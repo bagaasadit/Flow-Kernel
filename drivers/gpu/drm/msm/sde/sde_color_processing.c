@@ -307,7 +307,9 @@ static int sde_cp_enable_crtc_blob_property(struct drm_crtc *crtc,
 	 */
 	blob = drm_property_lookup_blob(crtc->dev, val);
 	if (!blob) {
-		if (prop_node->blob_ptr && prop_node->blob_ptr->base.id == val)
+		struct drm_property_blob *cur_blob = prop_node->blob_ptr;
+
+		if (cur_blob && cur_blob->base.id == val)
 			return 0;
 		DRM_ERROR("invalid blob id %lld\n", val);
 		return -EINVAL;
