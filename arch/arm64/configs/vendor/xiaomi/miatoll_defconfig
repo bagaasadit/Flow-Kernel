@@ -1,5 +1,5 @@
 # CONFIG_ZONE_DMA is not set
-CONFIG_LOCALVERSION="-Flow-v1.0.1"
+CONFIG_LOCALVERSION="-Flow-v1.0.2"
 # CONFIG_LOCALVERSION_AUTO is not set
 CONFIG_TOOLS_SUPPORT_RELR=y
 # CONFIG_FHANDLE is not set
@@ -30,8 +30,9 @@ CONFIG_CGROUP_CPUACCT=y
 CONFIG_CGROUP_BPF=y
 CONFIG_NAMESPACES=y
 CONFIG_PID_NS=y
-CONFIG_SCHED_CASS=y
+# CONFIG_SCHED_CASS is not set
 # CONFIG_SCHED_BORE is not set
+CONFIG_SCHED_AUTOGROUP=y
 CONFIG_SCHED_TUNE=y
 # CONFIG_CPUSET_ASSIST is not set
 CONFIG_DEFAULT_USE_ENERGY_AWARE=y
@@ -105,7 +106,7 @@ CONFIG_ZSMALLOC=y
 # CONFIG_BALANCE_ANON_FILE_RECLAIM is not set
 CONFIG_SECCOMP=y
 # CONFIG_UNMAP_KERNEL_AT_EL0 is not set
-CONFIG_ARM64_SSBD=y
+# CONFIG_ARM64_SSBD is not set
 CONFIG_ARMV8_DEPRECATED=y
 CONFIG_SWP_EMULATION=y
 CONFIG_CP15_BARRIER_EMULATION=y
@@ -903,7 +904,7 @@ CONFIG_MACVLAN=y
 # firmware file into a 60 second userspace stall.
 # ---------------------------------------------------------------------------
 
-CONFIG_CFS_BANDWIDTH=y
+# CONFIG_CFS_BANDWIDTH is not set
 CONFIG_MEMCG=y
 CONFIG_MEMCG_SWAP=y
 CONFIG_MEMCG_SWAP_ENABLED=y
@@ -991,7 +992,7 @@ CONFIG_BPF_JIT_DEFAULT_ON=y
 # expects to set it to 1 during boot silently fails. Default 0 it is.
 # ---------------------------------------------------------------------------
 CONFIG_BPF_STREAM_PARSER=y
-CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
+# CONFIG_BPF_UNPRIV_DEFAULT_OFF is not set
 
 # LZ4 v1.11.0 HC crypto backend and fgetpriority syscall filter
 CONFIG_CRYPTO_LZ4=y
