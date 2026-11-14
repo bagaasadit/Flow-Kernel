@@ -825,6 +825,36 @@ static void test_quiesce(void)
 	assert(!a.state && !a.rtp_work.queued);
 	cleanup();
 }
+static void test_constant_and_stale_stop(void)
+{
+	struct ff_effect c = {
+		.type = FF_CONSTANT,
+		.id = 6,
+		.replay.length = 45,
+		.u.constant.level = 0x3fff,
+	};
+	s16 data[3];
+
+	setup();
+	pre[10].level = 0x80;
+	assert(aw8624_haptics_upload_effect(&input, &c, NULL) == 0);
+	assert(slots[6].activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE);
+	assert(slots[6].vmax_mv == 0x3fff && slots[6].duration == 45);
+	play(6, 1);
+	assert(a.play.vmax_mv == 0x3fff);
+	aw8624_vibrator_work_routine(&a.vibrator_work);
+	assert(start_count == 1 && written_gain == 0x40);
+
+	/* Stale queued rtp_work must not stop a newer active RAM playback. */
+	assert(upload(2, 85, AW8624_STRONG_MAGNITUDE, data) == 0);
+	play(2, 1);
+	replace_before_request = true;
+	stop_reads = 0;
+	aw8624_rtp_work_routine(&a.rtp_work);
+	assert(fw_calls == 0 && start_count == 1 && stop_reads == 0);
+	cleanup();
+}
+
 int main(void)
 {
 	test_stop_delay();
@@ -834,6 +864,7 @@ int main(void)
 	test_timed_playback();
 	test_firmware_worker();
 	test_quiesce();
+	test_constant_and_stale_stop();
 	puts("AW8624 extracted-code tests: routing, slots, gain, timer and RTP fallback passed");
 	return 0;
 }

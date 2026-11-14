@@ -17,8 +17,11 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/spinlock.h>
 #include <uapi/drm/msm_drm_pp.h>
 #include "sde_hw_kcal_ctrl.h"
+
+static DEFINE_SPINLOCK(kcal_lut_lock);
 
 static struct sde_hw_kcal kcal_lut_data = {
 	.enabled		= SDE_HW_KCAL_ENABLED,
@@ -45,7 +48,11 @@ struct sde_hw_kcal *sde_hw_kcal_get(void)
 
 struct drm_msm_pa_hsic sde_hw_kcal_hsic_struct(void)
 {
-	return (struct drm_msm_pa_hsic) {
+	struct drm_msm_pa_hsic hsic;
+	unsigned long flags;
+
+	spin_lock_irqsave(&kcal_lut_lock, flags);
+	hsic = (struct drm_msm_pa_hsic) {
 		.flags = PA_HSIC_HUE_ENABLE |
 			 PA_HSIC_SAT_ENABLE |
 			 PA_HSIC_VAL_ENABLE |
@@ -55,13 +62,23 @@ struct drm_msm_pa_hsic sde_hw_kcal_hsic_struct(void)
 		.value		= kcal_lut_data.hsic.value,
 		.contrast	= kcal_lut_data.hsic.contrast,
 	};
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);
+
+	return hsic;
 }
 
 void sde_hw_kcal_pcc_adjust(u32 *data, int plane)
 {
 	struct sde_hw_kcal_pcc *pcc = &kcal_lut_data.pcc;
-	u32 palette[3] = { pcc->red, pcc->green, pcc->blue };
+	u32 palette[3];
+	unsigned long flags;
 	int idx = plane + 3 * (plane + 1);
+
+	spin_lock_irqsave(&kcal_lut_lock, flags);
+	palette[0] = pcc->red;
+	palette[1] = pcc->green;
+	palette[2] = pcc->blue;
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);
 
 	data[idx] *= palette[plane];
 	data[idx] /= 256;
@@ -75,13 +92,20 @@ static ssize_t show_##node(struct device *dev,				\
 			   struct device_attribute *attr,		\
 			   char *buf)					\
 {									\
-	return scnprintf(buf, 6, "%u\n", kcal_lut_data.object);	\
+	unsigned long flags;						\
+	u32 val;							\
+									\
+	spin_lock_irqsave(&kcal_lut_lock, flags);			\
+	val = kcal_lut_data.object;					\
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);			\
+	return scnprintf(buf, 6, "%u\n", val);				\
 }									\
 									\
 static ssize_t store_##node(struct device *dev,			\
 			    struct device_attribute *attr,		\
 			    const char *buf, size_t count)		\
 {									\
+	unsigned long flags;						\
 	u32 val;							\
 	int ret;							\
 									\
@@ -89,7 +113,9 @@ static ssize_t store_##node(struct device *dev,			\
 	if (ret || val < min || val > max)				\
 		return -EINVAL;					\
 									\
+	spin_lock_irqsave(&kcal_lut_lock, flags);			\
 	kcal_lut_data.object = val;					\
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);			\
 									\
 	kcal_force_update();						\
 									\
@@ -103,9 +129,16 @@ static ssize_t show_kcal(struct device *dev,
 			 char *buf)
 {
 	struct sde_hw_kcal_pcc *pcc = &kcal_lut_data.pcc;
+	unsigned long flags;
+	u32 r, g, b;
 
-	return scnprintf(buf, 13, "%u %u %u\n",
-			 pcc->red, pcc->green, pcc->blue);
+	spin_lock_irqsave(&kcal_lut_lock, flags);
+	r = pcc->red;
+	g = pcc->green;
+	b = pcc->blue;
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);
+
+	return scnprintf(buf, 13, "%u %u %u\n", r, g, b);
 }
 
 static ssize_t store_kcal(struct device *dev,
@@ -113,6 +146,7 @@ static ssize_t store_kcal(struct device *dev,
 			  const char *buf, size_t count)
 {
 	struct sde_hw_kcal_pcc *pcc = &kcal_lut_data.pcc;
+	unsigned long flags;
 	u32 kcal_r, kcal_g, kcal_b;
 	int ret;
 
@@ -123,9 +157,11 @@ static ssize_t store_kcal(struct device *dev,
 	    kcal_b < 1 || kcal_b > 256)
 		return -EINVAL;
 
+	spin_lock_irqsave(&kcal_lut_lock, flags);
 	pcc->red   = max(kcal_r, kcal_lut_data.min_value);
 	pcc->green = max(kcal_g, kcal_lut_data.min_value);
 	pcc->blue  = max(kcal_b, kcal_lut_data.min_value);
+	spin_unlock_irqrestore(&kcal_lut_lock, flags);
 
 	kcal_force_update();
 

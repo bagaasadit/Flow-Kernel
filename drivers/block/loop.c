@@ -624,7 +624,7 @@ static void loop_reread_partitions(struct loop_device *lo,
 		rc = __blkdev_reread_part(bdev);
 	else
 		rc = blkdev_reread_part(bdev);
-	if (rc)
+	if (rc && rc != -EACCES)
 		pr_warn("%s: partition scan of loop%d (%s) failed (rc=%d)\n",
 			__func__, lo->lo_number, lo->lo_file_name, rc);
 }

@@ -4370,8 +4370,22 @@ out:
 	return rc;
 }
 
+static void mmc_blk_shutdown_disk(struct mmc_blk_data *md)
+{
+	if (md && md->disk && (md->disk->flags & GENHD_FL_UP))
+		del_gendisk(md->disk);
+}
+
 static void mmc_blk_shutdown(struct mmc_card *card)
 {
+	struct mmc_blk_data *md = mmc_get_drvdata(card);
+	struct mmc_blk_data *part_md;
+
+	if (md) {
+		list_for_each_entry(part_md, &md->part, part)
+			mmc_blk_shutdown_disk(part_md);
+		mmc_blk_shutdown_disk(md);
+	}
 	_mmc_blk_suspend(card, 1);
 }
 

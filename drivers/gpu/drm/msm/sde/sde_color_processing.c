@@ -307,6 +307,8 @@ static int sde_cp_enable_crtc_blob_property(struct drm_crtc *crtc,
 	 */
 	blob = drm_property_lookup_blob(crtc->dev, val);
 	if (!blob) {
+		if (prop_node->blob_ptr && prop_node->blob_ptr->base.id == val)
+			return 0;
 		DRM_ERROR("invalid blob id %lld\n", val);
 		return -EINVAL;
 	}
@@ -1030,14 +1032,15 @@ exit:
 }
 
 #ifdef CONFIG_DRM_MSM_KCAL_CTRL
+static DEFINE_MUTEX(g_pcc_lock);
 static struct drm_crtc *g_pcc_crtc;
 static struct drm_property *g_pcc_property;
 static uint64_t g_pcc_val;
 #endif
 
-int sde_cp_crtc_set_property(struct drm_crtc *crtc,
-				struct drm_property *property,
-				uint64_t val)
+static int __sde_cp_crtc_set_property(struct drm_crtc *crtc,
+				      struct drm_property *property,
+				      uint64_t val, bool *is_kcal_pcc)
 {
 	struct sde_cp_node *prop_node = NULL;
 	struct sde_crtc *sde_crtc = NULL;
@@ -1069,12 +1072,8 @@ int sde_cp_crtc_set_property(struct drm_crtc *crtc,
 	}
 
 #ifdef CONFIG_DRM_MSM_KCAL_CTRL
-	if (prop_node->feature == SDE_CP_CRTC_DSPP_PCC) {
-		pr_debug("%s pcc kad kcal\n", __func__);
-		g_pcc_crtc = crtc;
-		g_pcc_property = property;
-		g_pcc_val = val;
-	}
+	if (prop_node->feature == SDE_CP_CRTC_DSPP_PCC && is_kcal_pcc)
+		*is_kcal_pcc = true;
 #endif
 
 	/**
@@ -1137,13 +1136,38 @@ exit:
 	return ret;
 }
 
+int sde_cp_crtc_set_property(struct drm_crtc *crtc,
+				struct drm_property *property,
+				uint64_t val)
+{
+	bool is_kcal_pcc = false;
+	int ret;
+
+	ret = __sde_cp_crtc_set_property(crtc, property, val, &is_kcal_pcc);
+#ifdef CONFIG_DRM_MSM_KCAL_CTRL
+	if (!ret && is_kcal_pcc) {
+		mutex_lock(&g_pcc_lock);
+		g_pcc_crtc = crtc;
+		g_pcc_property = property;
+		g_pcc_val = val;
+		mutex_unlock(&g_pcc_lock);
+	}
+#endif
+	return ret;
+}
+
 #ifdef CONFIG_DRM_MSM_KCAL_CTRL
 void kcal_force_update(void)
 {
-	if (g_pcc_crtc) {
+	bool dummy = false;
+
+	mutex_lock(&g_pcc_lock);
+	if (g_pcc_crtc && g_pcc_property) {
 		pr_debug("%s force kad kcal\n", __func__);
-		sde_cp_crtc_set_property(g_pcc_crtc, g_pcc_property, g_pcc_val);
+		__sde_cp_crtc_set_property(g_pcc_crtc, g_pcc_property,
+					   g_pcc_val, &dummy);
 	}
+	mutex_unlock(&g_pcc_lock);
 }
 EXPORT_SYMBOL(kcal_force_update);
 #endif
@@ -1193,6 +1217,16 @@ void sde_cp_crtc_destroy_properties(struct drm_crtc *crtc)
 		DRM_ERROR("invalid sde_crtc %pK\n", sde_crtc);
 		return;
 	}
+
+#ifdef CONFIG_DRM_MSM_KCAL_CTRL
+	mutex_lock(&g_pcc_lock);
+	if (g_pcc_crtc == crtc) {
+		g_pcc_crtc = NULL;
+		g_pcc_property = NULL;
+		g_pcc_val = 0;
+	}
+	mutex_unlock(&g_pcc_lock);
+#endif
 
 	list_for_each_entry_safe(prop_node, n, &sde_crtc->feature_list,
 				 feature_list) {

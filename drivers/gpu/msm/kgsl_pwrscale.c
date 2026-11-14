@@ -585,6 +585,8 @@ int kgsl_busmon_target(struct device *dev, unsigned long *freq, u32 flags)
 
 int kgsl_busmon_get_cur_freq(struct device *dev, unsigned long *freq)
 {
+	if (freq)
+		*freq = 0;
 	return 0;
 }
 

@@ -1,5 +1,5 @@
 # CONFIG_ZONE_DMA is not set
-CONFIG_LOCALVERSION="-Flow-v1.0.0"
+CONFIG_LOCALVERSION="-Flow-v1.0.1"
 # CONFIG_LOCALVERSION_AUTO is not set
 CONFIG_TOOLS_SUPPORT_RELR=y
 # CONFIG_FHANDLE is not set
@@ -10,8 +10,9 @@ CONFIG_TASKSTATS=y
 CONFIG_TASK_XACCT=y
 CONFIG_TASK_IO_ACCOUNTING=y
 CONFIG_PSI=y
-# CONFIG_LRU_GEN is not set
-# CONFIG_LRU_GEN_ENABLED is not set
+CONFIG_LRU_GEN=y
+CONFIG_LRU_GEN_ENABLED=y
+# CONFIG_LRU_GEN_STATS is not set
 CONFIG_RCU_EXPERT=y
 CONFIG_RCU_FAST_NO_HZ=y
 CONFIG_RCU_NOCB_CPU=y
@@ -38,7 +39,7 @@ CONFIG_BLK_DEV_INITRD=y
 # CONFIG_RD_XZ is not set
 # CONFIG_RD_LZO is not set
 CONFIG_RD_LZ4=y
-CONFIG_KALLSYMS_ALL=y
+# CONFIG_KALLSYMS_ALL is not set
 CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y
 CONFIG_BPF_SYSCALL=y
 CONFIG_BPF_JIT_ALWAYS_ON=y
@@ -101,7 +102,7 @@ CONFIG_HZ_100=y
 CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
 CONFIG_CMA=y
 CONFIG_ZSMALLOC=y
-CONFIG_BALANCE_ANON_FILE_RECLAIM=y
+# CONFIG_BALANCE_ANON_FILE_RECLAIM is not set
 CONFIG_SECCOMP=y
 # CONFIG_UNMAP_KERNEL_AT_EL0 is not set
 CONFIG_ARM64_SSBD=y
@@ -851,7 +852,7 @@ CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
 # Legacy kernel (< 5.10), so it is built in rather than loaded as an LKM.
 # CONFIG_KEYS is required: the userspace `nm` tool talks to the kernel
 # through add_key()/keyctl rather than an ioctl on a /dev node.
-CONFIG_NOMOUNT=y
+# CONFIG_NOMOUNT is not set
 CONFIG_KEYS=y
 CONFIG_UCLAMP_TASK=y
 CONFIG_UCLAMP_TASK_GROUP=y
@@ -990,7 +991,7 @@ CONFIG_BPF_JIT_DEFAULT_ON=y
 # expects to set it to 1 during boot silently fails. Default 0 it is.
 # ---------------------------------------------------------------------------
 CONFIG_BPF_STREAM_PARSER=y
-# CONFIG_BPF_UNPRIV_DEFAULT_OFF is not set
+CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
 
 # LZ4 v1.11.0 HC crypto backend and fgetpriority syscall filter
 CONFIG_CRYPTO_LZ4=y

@@ -55,6 +55,7 @@ static DEFINE_HASHTABLE(SUS_TYPE_HLIST, 10);
 
 struct st_susfs_sus_type_hlist {
 	struct hlist_node                       node;
+	u32                                     type_value;
 };
 
 int susfs_add_sus_type(const char *secctx, u32 type_value) {
@@ -64,6 +65,8 @@ int susfs_add_sus_type(const char *secctx, u32 type_value) {
 
 	mutex_lock(&susfs_mutex_lock_sus_type);
 	hash_for_each_possible_safe(SUS_TYPE_HLIST, tmp_entry, tmp_hlist_node, node, type_value) {
+		if (tmp_entry->type_value != type_value)
+			continue;
 		SUSFS_LOGE("secctx '%s', type_value '%u', was added before already\n",
 			secctx, type_value);
 		err = -EINVAL;
@@ -75,6 +78,7 @@ int susfs_add_sus_type(const char *secctx, u32 type_value) {
 		err = -ENOMEM;
 		goto unlock;
 	}
+	new_entry->type_value = type_value;
 
 	hash_add_rcu(SUS_TYPE_HLIST, &new_entry->node, type_value);
 	SUSFS_LOGI_RL("secctx '%s', type '%u', has been added to SUS_TYPE_HLIST\n",
@@ -88,13 +92,14 @@ bool susfs_is_sus_type_rcu(u32 type_value) {
 	struct st_susfs_sus_type_hlist *entry = NULL;
 
 	hash_for_each_possible_rcu(SUS_TYPE_HLIST, entry, node, type_value) {
-		return true;
+		if (entry->type_value == type_value)
+			return true;
 	}
 	return false;
 }
 
 static DEFINE_MUTEX(susfs_mutex_lock_sus_avd_allowed_hlist);
-static DEFINE_HASHTABLE(SUS_AVD_ALLOWED_HLIST, 18);
+static DEFINE_HASHTABLE(SUS_AVD_ALLOWED_HLIST, 10);
 
 struct susfs_sus_av_rule {
 	struct hlist_node node;
@@ -129,21 +134,18 @@ int susfs_add_sus_avd_allowed_by_type(u32 s_type, u32 t_type, u32 c_type, u32 or
 
 	mutex_lock(&susfs_mutex_lock_sus_avd_allowed_hlist);
 
-	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
-	if (!entry) {
-		err = -ENOMEM;
-		goto unlock;
-	}
-
 	key = susfs_av_rule_hash(s_type, t_type, c_type);
 	hash_for_each_possible_safe(SUS_AVD_ALLOWED_HLIST, tmp_entry, tmp_hlist_node, node, key) {
 		if (tmp_entry->s_type == s_type &&
 		    tmp_entry->t_type == t_type &&
 		    tmp_entry->c_type == c_type)
-		{
-			kfree(entry);
 			goto unlock;
-		}
+	}
+
+	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry) {
+		err = -ENOMEM;
+		goto unlock;
 	}
 
 	entry->s_type = s_type;
@@ -688,7 +690,8 @@ void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *s
 out_spoof_kstat:
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_ino) {
-		if (entry->target_dev == target_dev &&
+		if (entry->info.target_ino == target_ino &&
+			entry->target_dev == target_dev &&
 			entry->is_fuse == is_fuse)
 		{
 			SUSFS_LOGI("spoofing kstat for vfs_getattr_nosec, target_ino: %lu, target_dev: %u\n",
@@ -757,7 +760,8 @@ void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, uns
 out_spoof_kstat:
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_ino) {
-		if (entry->target_dev == target_dev &&
+		if (entry->info.target_ino == target_ino &&
+			entry->target_dev == target_dev &&
 			entry->is_fuse == is_fuse)
 		{
 			SUSFS_LOGI("spoofing kstat for show_map_vma, target_ino: %lu, target_dev: %u\n", target_ino, target_dev);
@@ -779,7 +783,8 @@ int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, b
 
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_inode->i_ino) {
-		if (entry->target_dev == inode->i_sb->s_dev)
+		if (entry->info.target_ino == target_inode->i_ino &&
+			entry->target_dev == inode->i_sb->s_dev)
 		{
 			SUSFS_LOGI("spoofing kstat for vfs_statfs, target_ino: %lu, target_dev: %u\n", target_inode->i_ino, target_inode->i_sb->s_dev);
 			memcpy(buf, &entry->spoofed_kstatfs, sizeof(struct kstatfs));
@@ -796,7 +801,8 @@ void susfs_sus_kstat_spoof_inotify_fdinfo(unsigned long *out_target_ino, dev_t *
 
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
-		if (entry->target_dev == *out_target_dev)
+		if (entry->info.target_ino == *out_target_ino &&
+			entry->target_dev == *out_target_dev)
 		{
 			SUSFS_LOGI("spoofing kstat for inotify_fdinfo, target_ino: %lu, target_dev: %u\n", *out_target_ino, *out_target_dev);
 			*out_target_ino = entry->info.spoofed_ino;
@@ -813,7 +819,8 @@ void susfs_sus_kstat_spoof_proc_fd_seq_show(int *out_target_mnt_id, unsigned lon
 
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
-		if (entry->target_dev == target_dev)
+		if (entry->info.target_ino == *out_target_ino &&
+			entry->target_dev == target_dev)
 		{
 			SUSFS_LOGI("spoofing kstat for proc_fd_seq_show, target_ino: %lu, target_dev: %u\n", *out_target_ino, target_dev);
 			*out_target_mnt_id = entry->spoofed_mnt_id;
@@ -1157,7 +1164,8 @@ struct filename *susfs_open_redirect_spoof_do_sys_openat(struct inode *inode) {
 	int srcu_idx = srcu_read_lock(&susfs_srcu_open_redirect);
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (!entry->reversed_lookup_only &&
+		if (entry->target_ino == inode->i_ino &&
+			!entry->reversed_lookup_only &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			switch(entry->info.uid_scheme) {
@@ -1201,7 +1209,8 @@ int susfs_open_redirect_spoof_vfs_readlink(struct inode *inode, char __user *buf
 	int srcu_idx = srcu_read_lock(&susfs_srcu_open_redirect);
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (entry->reversed_lookup_only &&
+		if (entry->target_ino == inode->i_ino &&
+			entry->reversed_lookup_only &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			SUSFS_LOGI("spoof path '%s' to '%s'\n",
@@ -1229,7 +1238,8 @@ int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_bu
 	int srcu_idx = srcu_read_lock(&susfs_srcu_open_redirect);
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (entry->reversed_lookup_only &&
+		if (entry->target_ino == inode->i_ino &&
+			entry->reversed_lookup_only &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			SUSFS_LOGI("spoof path '%s' to '%s'\n",
@@ -1258,7 +1268,8 @@ int susfs_open_redirect_spoof_show_map_vma_srcu(struct inode *inode, unsigned lo
 	}
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (entry->reversed_lookup_only &&
+		if (entry->target_ino == inode->i_ino &&
+			entry->reversed_lookup_only &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			SUSFS_LOGI("spoof maps ino/dev/name for redirected path: '%s'\n",
@@ -1657,8 +1668,10 @@ void susfs_set_priority_uid_filter(void __user **user_info) {
 	if (!is_uid_filter_set_before)
 		is_uid_filter_set_before = true;
 	mutex_unlock(&susfs_mutex_lock_priority_uid_filter);
-	synchronize_rcu();
-	kfree_rcu(old_bitmap, rcu);
+	if (old_bitmap) {
+		synchronize_rcu();
+		kfree_rcu(old_bitmap, rcu);
+	}
 
 	SUSFS_LOGI("the priority uid filter is set\n");
 	err = 0;
@@ -1731,8 +1744,10 @@ static int susfs_priority_app_strings_worker(void *data) {
 	rcu_assign_pointer(priority_uid_filter_bitmap, new_bitmap);
 	new_bitmap = NULL;
 	mutex_unlock(&susfs_mutex_lock_priority_uid_filter);
-	synchronize_rcu();
-	kfree_rcu(old_bitmap, rcu);
+	if (old_bitmap) {
+		synchronize_rcu();
+		kfree_rcu(old_bitmap, rcu);
+	}
 
 	SUSFS_LOGI("the uids of the priority uid filter are resolved again\n");
 

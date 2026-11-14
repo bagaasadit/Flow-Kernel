@@ -1314,6 +1314,14 @@ static int aw8624_haptic_play_effect_seq(struct aw8624 *aw8624,
 		seq = aw8624->info.effect_id_boundary;
 		if (aw8624->effects_count > 0 && seq >= aw8624->effects_count)
 			seq = aw8624->effects_count - 1;
+		aw8624_haptic_effect_strength(aw8624, magnitude);
+		if (aw8624->info.gain_flag && seq < aw8624->effects_count &&
+		    aw8624->predefined && aw8624->predefined[seq].level)
+			aw8624->level = min_t(u32, 255,
+				DIV_ROUND_CLOSEST((u32)aw8624->level *
+						  aw8624->predefined[seq].level,
+						  AW8624_GAIN_FULL));
+		aw8624_haptic_set_gain(aw8624, aw8624->level);
 		aw8624_haptic_set_repeat_wav_seq(aw8624, seq + 1);
 		aw8624_haptic_play_repeat_seq(aw8624, true);
 	}
@@ -1591,6 +1599,17 @@ static void aw8624_rtp_work_routine(struct work_struct *work)
 			mutex_unlock(&aw8624->lock);
 			return;
 		}
+	}
+	if (READ_ONCE(aw8624->play_generation) != generation &&
+	    READ_ONCE(aw8624->state) && !READ_ONCE(aw8624->suspended)) {
+		atomic_set(&aw8624->exit_in_rtp_loop, 0);
+		wake_up_interruptible(&aw8624->stop_wait_q);
+		mutex_lock(&aw8624->rtp_lock);
+		aw8624->rtp_cnt = 0;
+		aw8624->rtp_init = 0;
+		mutex_unlock(&aw8624->rtp_lock);
+		pm_relax(aw8624->dev);
+		goto out;
 	}
 	aw8624_haptic_stop(aw8624);
 	atomic_set(&aw8624->exit_in_rtp_loop, 0);
@@ -2403,6 +2422,11 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 	VIB_DEBUG("state=%d activate_mode=%d duration=%d", aw8624->state,
 		  aw8624->activate_mode, aw8624->duration);
 	mutex_lock(&aw8624->lock);
+	if (READ_ONCE(aw8624->state) && !READ_ONCE(aw8624->suspended) &&
+	    READ_ONCE(aw8624->activate_mode) == AW8624_HAPTIC_ACTIVATE_RTP_MODE) {
+		mutex_unlock(&aw8624->lock);
+		return;
+	}
 	aw8624_haptic_upload_lra(aw8624, F0_CALI);
 	stop_rtp = aw8624->play_mode == AW8624_HAPTIC_RTP_MODE;
 	if (stop_rtp) {
@@ -2423,24 +2447,33 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 			aw8624_haptic_play_effect_seq(aw8624, true);
 		} else if (aw8624->activate_mode ==
 			   AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE) {
-			   
 			aw8624_haptic_ram_vbat_comp(aw8624, true);
 			aw8624_haptic_play_effect_seq(aw8624, true);
 			if (aw8624->duration <= 0)
 				aw8624->duration = AW8624_DEFAULT_PLAYBACK_MS;
-			hrtimer_start(&aw8624->timer,
-				      ktime_set(aw8624->duration / 1000,
-						(aw8624->duration % 1000) *
-						1000000), HRTIMER_MODE_REL);
+			if (READ_ONCE(aw8624->state) &&
+			    !READ_ONCE(aw8624->suspended))
+				hrtimer_start(&aw8624->timer,
+					      ktime_set(aw8624->duration / 1000,
+							(aw8624->duration % 1000) *
+							1000000),
+					      HRTIMER_MODE_REL);
+			else
+				aw8624_haptic_stop(aw8624);
 		} else if (aw8624->activate_mode ==
 			   AW8624_HAPTIC_ACTIVATE_CONT_MODE) {
 			aw8624_haptic_cont(aw8624);
 			if (aw8624->duration <= 0)
 				aw8624->duration = AW8624_DEFAULT_PLAYBACK_MS;
-			hrtimer_start(&aw8624->timer,
-				      ktime_set(aw8624->duration / 1000,
-						(aw8624->duration % 1000) *
-						1000000), HRTIMER_MODE_REL);
+			if (READ_ONCE(aw8624->state) &&
+			    !READ_ONCE(aw8624->suspended))
+				hrtimer_start(&aw8624->timer,
+					      ktime_set(aw8624->duration / 1000,
+							(aw8624->duration % 1000) *
+							1000000),
+					      HRTIMER_MODE_REL);
+			else
+				aw8624_haptic_stop(aw8624);
 		} else {
 			/*other mode */
 		}
@@ -2981,9 +3014,16 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 	}
 
 	if (effect->type == FF_CONSTANT) {
+		int level = effect->u.constant.level;
+
+		if (level < 0)
+			level = -level;
+		if (level > AW8624_STRONG_MAGNITUDE)
+			level = AW8624_STRONG_MAGNITUDE;
 		uploaded.duration = effect->replay.length;
 		uploaded.activate_mode = AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE;
 		uploaded.effect_id = aw8624->info.effect_id_boundary;
+		uploaded.vmax_mv = level ? level : AW8624_STRONG_MAGNITUDE;
 	} else if (effect->type == FF_PERIODIC) {
 		if (copy_from_user(data, effect->u.periodic.custom_data,
 				   sizeof(data))) {
@@ -3086,7 +3126,8 @@ static int aw8624_haptics_playback(struct input_dev *dev, int effect_id,
 	aw8624->effect_id = uploaded->effect_id;
 	aw8624->duration = uploaded->duration;
 	aw8624->activate_mode = uploaded->activate_mode;
-	if (uploaded->effect_type == FF_PERIODIC)
+	if (uploaded->effect_type == FF_PERIODIC ||
+	    uploaded->effect_type == FF_CONSTANT)
 		aw8624->play.vmax_mv = uploaded->vmax_mv;
 	WRITE_ONCE(aw8624->state, val > 0);
 	aw8624->play_requested_at = ktime_get();
@@ -3101,7 +3142,7 @@ static int aw8624_haptics_playback(struct input_dev *dev, int effect_id,
 		   aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
 		VIB_DEBUG("enter  ram_mode");
 		//schedule_work(&aw8624->vibrator_work)
-		queue_work(aw8624->work_queue, &aw8624->vibrator_work);;
+		queue_work(aw8624->work_queue, &aw8624->vibrator_work);
 	} else if (aw8624->effect_type == FF_PERIODIC &&
 		   aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RTP_MODE) {
 		VIB_DEBUG("enter  rtp_mode");
@@ -3386,6 +3427,7 @@ static ssize_t aw8624_i2c_ram_show(struct device *dev,
 	unsigned int i = 0;
 	unsigned char reg_val = 0;
 
+	mutex_lock(&aw8624->lock);
 	aw8624_haptic_stop(aw8624);
 	/* RAMINIT Enable */
 	aw8624_i2c_write_bits(aw8624, AW8624_REG_SYSCTRL,
@@ -3396,16 +3438,18 @@ static ssize_t aw8624_i2c_ram_show(struct device *dev,
 			 (unsigned char)(aw8624->ram.base_addr >> 8));
 	aw8624_i2c_write(aw8624, AW8624_REG_RAMADDRL,
 			 (unsigned char)(aw8624->ram.base_addr & 0x00ff));
-	len += snprintf(buf + len, PAGE_SIZE - len, "aw8624_haptic_ram:\n");
-	for (i = 0; i < aw8624->ram.len; i++) {
+	len += scnprintf(buf + len, PAGE_SIZE - len, "aw8624_haptic_ram:\n");
+	for (i = 0; i < aw8624->ram.len && len < PAGE_SIZE - 1; i++) {
 		aw8624_i2c_read(aw8624, AW8624_REG_RAMDATA, &reg_val);
-		len += snprintf(buf + len, PAGE_SIZE - len, "0x%02x,", reg_val);
+		len += scnprintf(buf + len, PAGE_SIZE - len, "0x%02x,", reg_val);
 	}
-	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+	if (len < PAGE_SIZE - 1)
+		len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
 	/* RAMINIT Disable */
 	aw8624_i2c_write_bits(aw8624, AW8624_REG_SYSCTRL,
 			      AW8624_BIT_SYSCTRL_RAMINIT_MASK,
 			      AW8624_BIT_SYSCTRL_RAMINIT_OFF);
+	mutex_unlock(&aw8624->lock);
 
 	return len;
 }

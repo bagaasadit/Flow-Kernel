@@ -40,9 +40,10 @@ table = re.search(r"static char aw8624_rtp_name\[\]\[AW8624_RTP_NAME_MAX\] = \{.
 if not table:
     raise RuntimeError("cannot find RTP filename table")
 with tempfile.TemporaryDirectory(prefix="aw8624-test-") as temp:
+    pie_flags = ["-fPIE", "-pie"] if os.path.exists("/system/bin/linker64") else ["-no-pie"]
     flags = ["-std=gnu11", "-O1", "-g", "-pthread", "-Wall", "-Wextra",
              "-Wno-unused-parameter", "-Wno-sign-compare", "-Wno-unused-function",
-             "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie"]
+             "-fsanitize=address,undefined", "-fno-omit-frame-pointer", *pie_flags]
     repeats = int(os.environ.get("AW8624_TEST_REPEATS", "1"))
     if repeats < 1:
         raise ValueError("AW8624_TEST_REPEATS must be at least 1")

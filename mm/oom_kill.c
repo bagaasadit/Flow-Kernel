@@ -1246,8 +1246,10 @@ SYSCALL_DEFINE2(process_mrelease, int, pidfd, unsigned int, flags)
 	 */
 	if (mm_has_notifiers(mm))
 		ret = -EAGAIN;
-	else if (!test_bit(MMF_OOM_SKIP, &mm->flags))
+	else if (!test_bit(MMF_OOM_SKIP, &mm->flags)) {
 		__oom_reap_task_mm(mm);
+		set_bit(MMF_OOM_SKIP, &mm->flags);
+	}
 
 	up_read(&mm->mmap_sem);
 
