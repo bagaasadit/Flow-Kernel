@@ -2914,8 +2914,9 @@ int do_swap_page(struct vm_fault *vmf)
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
 		do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
-		mem_cgroup_commit_charge(page, memcg, !skip_swapcache, false);
-		if (skip_swapcache) {
+		mem_cgroup_commit_charge(page, memcg,
+					 !skip_swapcache || swapcache, false);
+		if (skip_swapcache && !swapcache) {
 			lru_gen_swap_refault(page, entry);
 			lru_cache_add_anon(page);
 		}
