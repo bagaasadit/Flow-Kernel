@@ -321,6 +321,7 @@ struct smb1398_chip {
 	bool			in_suspend;
 	bool			six_pin_batt;
 	bool			qc3p5_ffc_batt;
+	bool			usb_present;
 };
 
 static const struct smb_irq smb_irqs[];
@@ -1555,6 +1556,8 @@ static void smb1398_status_change_work(struct work_struct *work)
 	 */
 	rc = power_supply_get_property(chip->usb_psy,
 			POWER_SUPPLY_PROP_PRESENT, &pval);
+	if (!rc)
+		WRITE_ONCE(chip->usb_present, !!pval.intval);
 	if (!rc && !pval.intval &&
 	    is_client_vote_enabled(chip->div2_cp_disable_votable, SRC_VOTER))
 		goto out;
@@ -1722,6 +1725,10 @@ static int smb1398_notifier_cb(struct notifier_block *nb,
 	unsigned long flags;
 
 	if (event != PSY_EVENT_PROP_CHANGED)
+		return NOTIFY_OK;
+
+	if (strcmp(psy->desc->name, "battery") == 0 &&
+	    !READ_ONCE(chip->usb_present))
 		return NOTIFY_OK;
 
 	if (strcmp(psy->desc->name, "battery") == 0 ||
@@ -2418,6 +2425,7 @@ static int smb1398_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	chip->die_temp = -ENODATA;
+	chip->usb_present = true;
 	chip->dev = &pdev->dev;
 	chip->regmap = dev_get_regmap(chip->dev->parent, NULL);
 	if (!chip->regmap) {

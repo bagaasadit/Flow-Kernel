@@ -2803,8 +2803,6 @@ int do_swap_page(struct vm_fault *vmf)
 				__SetPageLocked(page);
 				__SetPageSwapBacked(page);
 				set_page_private(page, entry.val);
-				lru_gen_swap_refault(page, entry);
-				lru_cache_add_anon(page);
 				swap_readpage(page, true);
 			}
 		} else {
@@ -2916,7 +2914,11 @@ int do_swap_page(struct vm_fault *vmf)
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
 		do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
-		mem_cgroup_commit_charge(page, memcg, true, false);
+		mem_cgroup_commit_charge(page, memcg, !skip_swapcache, false);
+		if (skip_swapcache) {
+			lru_gen_swap_refault(page, entry);
+			lru_cache_add_anon(page);
+		}
 		activate_page(page);
 	}
 

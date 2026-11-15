@@ -3807,8 +3807,10 @@ void lru_gen_scan_around(struct page_vma_mapped_walk *pvmw)
 	arch_enter_lazy_mmu_mode();
 
 	memcg = lock_page_memcg(pvmw->page);
-	if (WARN_ON_ONCE(!mem_cgroup_disabled() && !memcg))
+	if (WARN_ON_ONCE(!mem_cgroup_disabled() && !memcg)) {
+		__unlock_page_memcg(memcg);
 		goto out;
+	}
 
 	spin_lock_irq(&pgdat->lru_lock);
 

@@ -1475,7 +1475,9 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
 		}
 	}
 
-	ts_data->ts_workqueue = create_singlethread_workqueue("fts_wq");
+	ts_data->ts_workqueue = alloc_ordered_workqueue("fts_wq",
+							WQ_MEM_RECLAIM |
+							WQ_HIGHPRI);
 	if (!ts_data->ts_workqueue) {
 		FTS_ERROR("create fts workqueue fail");
 	}

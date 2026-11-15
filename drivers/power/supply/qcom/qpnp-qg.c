@@ -5190,7 +5190,9 @@ static int process_resume(struct qpnp_qg *chip)
 		chip->suspend_data = false;
 	}
 
-	schedule_delayed_work(&chip->ttf->ttf_work, 0);
+	schedule_delayed_work(&chip->ttf->ttf_work,
+		(chip->usb_present || chip->dc_present) ? 0 :
+			msecs_to_jiffies(chip->ttf->period_ms));
 
 	return rc;
 }

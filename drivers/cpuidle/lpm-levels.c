@@ -499,9 +499,33 @@ static int lpm_cpuidle_select(struct cpuidle_driver *drv,
 static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int idx)
 {
-	wfi();
+	struct lpm_cpu *cpu = per_cpu(cpu_lpm, dev->cpu);
+	const struct cpumask *cpumask = get_cpu_mask(dev->cpu);
+	int64_t start_time, end_time;
+	bool success = false;
 
-	return idx;
+	if (!cpu) {
+		wfi();
+		return idx;
+	}
+
+	for (; idx > 0; idx--) {
+		if (lpm_cpu_mode_allow(dev->cpu, idx, true))
+			break;
+	}
+
+	start_time = ktime_to_ns(ktime_get());
+	cpu_prepare(cpu, idx, true);
+	cluster_prepare(cpu->parent, cpumask, idx, true, start_time);
+
+	if (!need_resched())
+		success = psci_enter_sleep(cpu, idx, true);
+
+	end_time = ktime_to_ns(ktime_get());
+	cluster_unprepare(cpu->parent, cpumask, idx, true, end_time, success);
+	cpu_unprepare(cpu, idx, true);
+
+	return success ? idx : 0;
 }
 
 static void lpm_cpuidle_s2idle(struct cpuidle_device *dev,

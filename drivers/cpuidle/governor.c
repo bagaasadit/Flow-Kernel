@@ -107,6 +107,10 @@ int cpuidle_governor_latency_req(unsigned int cpu)
 	struct device *device = get_cpu_device(cpu);
 	int device_req = dev_pm_qos_raw_read_value(device);
 
-	return device_req < global_req ? device_req : global_req;
+	/* On 4.14 dev_pm_qos_raw_read_value() returns 0 for no constraint. */
+	if (device_req > 0 && device_req < global_req)
+		return device_req;
+
+	return global_req;
 }
 EXPORT_SYMBOL_GPL(cpuidle_governor_latency_req);
