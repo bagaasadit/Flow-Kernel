@@ -736,7 +736,7 @@ static int aw8624_haptic_stop_delay(struct aw8624 *aw8624)
 		pr_debug("%s wait for standby, reg glb_state=0x%02x\n",
 			 __func__, reg_val);
 		if (cnt < 99)
-			msleep(2);
+			usleep_range(1000, 1500);
 	}
 	pr_err("%s do not enter standby automatically\n", __func__);
 
@@ -1188,25 +1188,15 @@ static int aw8624_haptic_ram_vbat_comp(struct aw8624 *aw8624, bool flag)
 {
 	int temp_gain = 0;
 
-	if (flag) {
-		if (aw8624->ram_vbat_comp == AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE) {
-			aw8624_haptic_get_vbat(aw8624);
-			temp_gain =
-			    aw8624->gain * AW8624_VBAT_REFER / aw8624->vbat;
+	if (flag && aw8624->ram_vbat_comp == AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE) {
+		aw8624_haptic_get_vbat(aw8624);
+		temp_gain = aw8624->gain * AW8624_VBAT_REFER / aw8624->vbat;
 
-			if (temp_gain >
-			    (128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN)) {
-				temp_gain =
-				    128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN;
-				pr_debug("%s gain limit=%d\n", __func__,
-					 temp_gain);
-			}
-			aw8624_haptic_set_gain(aw8624, temp_gain);
-		} else {
-			aw8624_haptic_set_gain(aw8624, aw8624->gain);
+		if (temp_gain > (128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN)) {
+			temp_gain = 128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN;
+			pr_debug("%s gain limit=%d\n", __func__, temp_gain);
 		}
-	} else {
-		aw8624_haptic_set_gain(aw8624, aw8624->gain);
+		aw8624_haptic_set_gain(aw8624, temp_gain);
 	}
 
 	return 0;
@@ -3347,9 +3337,16 @@ static int aw8624_haptics_erase(struct input_dev *dev, int effect_id)
 static void aw8624_haptics_set_gain(struct input_dev *dev, u16 gain)
 {
 	struct aw8624 *aw8624 = input_get_drvdata(dev);
+	u32 clamped = min_t(u32, gain, 0x7fffU);
+	u16 scaled = DIV_ROUND_CLOSEST(clamped * 0xffffU, 0x7fffU);
 
-	/* This callback holds event_lock; perform sleeping I2C in the worker. */
-	WRITE_ONCE(aw8624->ff_gain, gain);
+	/*
+	 * QTI's VibratorOL HAL maps 100% amplitude onto 0x7fff rather than
+	 * 0xffff; rescale linearly so FF_CONSTANT keyboard typing matches
+	 * FF_PERIODIC system haptics strength while preserving slider scale.
+	 * This callback holds event_lock; perform sleeping I2C in the worker.
+	 */
+	WRITE_ONCE(aw8624->ff_gain, scaled);
 	if (!READ_ONCE(aw8624->suspended))
 		queue_work(aw8624->work_queue, &aw8624->gain_work);
 }

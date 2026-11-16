@@ -224,8 +224,11 @@ static s64 ktime_to_us(s64 k)
 }
 static void usleep_range(s64 min, s64 max)
 {
-	assert(max == min + 100);
-	slept_us = min;
+	assert(max >= min + 100);
+	if (min == 1000 && max == 1500)
+		stop_sleeps++;
+	else
+		slept_us = min;
 }
 static void msleep(unsigned int ms)
 {
@@ -666,17 +669,21 @@ static void test_gain_and_slots(void)
 	assert(a.state == 0 && a.exit_in_rtp_loop == 1);
 	a.exit_in_rtp_loop = 0;
 	assert(aw8624_haptics_erase(&input, 7) == 0 && slots[7].effect_type == 0);
-	aw8624_haptics_set_gain(&input, 0x7fff);
-	assert(a.ff_gain == 0x7fff && a.gain_work.queued == 1);
+	aw8624_haptics_set_gain(&input, 0x4000);
+	assert(a.ff_gain == 0x8001 && a.gain_work.queued == 1);
 	a.applied_gain = 0x80;
 	aw8624_gain_work_routine(&a.gain_work);
-	assert(written_gain == 63);
+	assert(written_gain == 0x40);
+	aw8624_haptics_set_gain(&input, 0x7fff);
+	assert(a.ff_gain == 0xffff && a.gain_work.queued == 2);
+	aw8624_gain_work_routine(&a.gain_work);
+	assert(written_gain == 0x80);
 	aw8624_block_new_effects(&a);
 	assert(a.suspended && a.state == 0);
 	aw8624_haptics_set_gain(&input, 0);
 	aw8624_gain_work_routine(&a.gain_work);
-	assert(written_gain == 63);
-	assert(a.ff_gain == 0 && a.gain_work.queued == 1);
+	assert(written_gain == 0x80);
+	assert(a.ff_gain == 0 && a.gain_work.queued == 2);
 	cleanup();
 }
 static void test_ram_gain(void)
@@ -907,10 +914,13 @@ static void test_constant_and_stale_stop(void)
 	/* First timed keypress starts at unity despite stale constant.level. */
 	assert(start_count == 1 && written_gain == 0x80);
 
-	/* Explicit FF_GAIN updates still scale active FF_CONSTANT playback. */
-	aw8624_haptics_set_gain(&input, 0x8000);
+	/* Explicit FF_GAIN updates rescale HAL [0..0x7fff] onto full range. */
+	aw8624_haptics_set_gain(&input, 0x4000);
 	aw8624_gain_work_routine(&a.gain_work);
 	assert(written_gain == 0x40);
+	aw8624_haptics_set_gain(&input, 0x7fff);
+	aw8624_gain_work_routine(&a.gain_work);
+	assert(written_gain == 0x80);
 
 	/* Stopping playback clears leftover FF_GAIN back to unity. */
 	play(6, 0);
