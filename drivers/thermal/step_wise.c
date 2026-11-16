@@ -102,6 +102,8 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 					next_target = instance->upper;
 			}
 		}
+		if (throttle && next_target == THERMAL_NO_TARGET)
+			next_target = max(cur_state, instance->lower);
 		break;
 	case THERMAL_TREND_DROP_FULL:
 		if (cur_state == instance->lower) {
@@ -109,6 +111,24 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 				next_target = THERMAL_NO_TARGET;
 		} else
 			next_target = instance->lower;
+		break;
+	case THERMAL_TREND_STABLE:
+		if (throttle) {
+			if (next_target == THERMAL_NO_TARGET) {
+				next_target = cur_state < instance->upper ?
+					    (cur_state + 1) : instance->upper;
+				if (next_target < instance->lower)
+					next_target = instance->lower;
+			}
+		} else {
+			if (cur_state <= instance->lower)
+				next_target = THERMAL_NO_TARGET;
+			else {
+				next_target = cur_state - 1;
+				if (next_target > instance->upper)
+					next_target = instance->upper;
+			}
+		}
 		break;
 	default:
 		break;
