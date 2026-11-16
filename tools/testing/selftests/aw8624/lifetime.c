@@ -13,7 +13,9 @@
 #include <time.h>
 
 typedef uint8_t u8;
+typedef uint16_t u16;
 typedef uint32_t u32;
+#define AW8624_MAX_RAM_WAVES 16
 #define READ_ONCE(x) __atomic_load_n(&(x), __ATOMIC_SEQ_CST)
 #define WRITE_ONCE(x, v) __atomic_store_n(&(x), (v), __ATOMIC_SEQ_CST)
 #define mutex_lock(m) assert(!pthread_mutex_lock(m))
@@ -77,6 +79,7 @@ struct aw8624 {
 	} ram;
 	unsigned int firmware_pending, rtp_file_num;
 	int ram_work, play_mode, ram_init, rtp_init;
+	u16 ram_wave_valid_mask;
 	bool shutting_down, suspended;
 	void *dev;
 };
@@ -176,6 +179,7 @@ static int aw8624_i2c_write(struct aw8624 *a, int r, int v)
 /* EXTRACT aw8624_request_firmware */
 /* EXTRACT aw8624_rtp_loaded */
 /* EXTRACT aw8624_rtp_update */
+/* EXTRACT aw8624_ram_wave_mask */
 /* EXTRACT aw8624_container_update */
 /* EXTRACT aw8624_ram_loaded */
 /* EXTRACT aw8624_ram_update */
@@ -320,9 +324,56 @@ static void test_shutdown_blocks_new_child(void)
 	       late_request == 0);
 	cleanup(&a);
 }
+static void test_ram_wave_mask(void)
+{
+	struct aw8624 a;
+	/*
+	 * 11-descriptor AW8624 SRAM image (base 0x0800):
+	 * eid 0,3,5,6,9,10: multi-byte non-zero payloads
+	 * eid 1,2,4,7: 1-byte placeholders (sa == ea)
+	 * eid 8: multi-byte all-zero payload
+	 */
+	const size_t total = 4 + 1 + 11 * 4 + 18;
+	struct aw8624_container *c = calloc(1, sizeof(*c) + total);
+	u8 *sram;
+	const u16 sa[11] = {0x082d, 0x082f, 0x0830, 0x0831, 0x0833, 0x0834,
+			    0x0836, 0x0838, 0x0839, 0x083b, 0x083d};
+	const u16 ea[11] = {0x082e, 0x082f, 0x0830, 0x0832, 0x0833, 0x0835,
+			    0x0837, 0x0838, 0x083a, 0x083c, 0x083e};
+
+	assert(c);
+	setup(&a);
+	c->len = (int)total;
+	c->data[2] = 0x08;
+	c->data[3] = 0x00;
+	sram = c->data + 4;
+	sram[0] = 0x85;
+	for (int i = 0; i < 11; i++) {
+		int off = 1 + i * 4;
+
+		sram[off] = sa[i] >> 8;
+		sram[off + 1] = sa[i] & 0xff;
+		sram[off + 2] = ea[i] >> 8;
+		sram[off + 3] = ea[i] & 0xff;
+	}
+	/* Populate non-zero sample bytes for valid waves; leave eid=8 zero. */
+	sram[0x2d] = 0x40;
+	sram[0x31] = 0x50;
+	sram[0x34] = 0x60;
+	sram[0x36] = 0x30;
+	sram[0x3b] = 0x46;
+	sram[0x3d] = 0x20;
+	assert(aw8624_container_update(&a, c));
+	assert(a.ram_wave_valid_mask ==
+	       ((1u << 0) | (1u << 3) | (1u << 5) | (1u << 6) | (1u << 9) |
+		(1u << 10)));
+	free(c);
+	cleanup(&a);
+}
 int main(void)
 {
 	test_firmware_paths();
+	test_ram_wave_mask();
 	test_shutdown_waits_for_child();
 	test_shutdown_blocks_new_child();
 	puts("AW8624 tests: firmware lifetime and suspend races passed");

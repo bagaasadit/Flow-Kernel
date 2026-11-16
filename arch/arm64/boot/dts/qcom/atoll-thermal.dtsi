@@ -1137,6 +1137,48 @@
 		thermal-sensors = <&pm6150l_adc_tm ADC_AMUX_THM1_PU2>;
 		wake-capable-sensor;
 		trips {
+			chg_trip0: chg-trip0 {
+				temperature = <37000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip1: chg-trip1 {
+				temperature = <38000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip2: chg-trip2 {
+				temperature = <39000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip3: chg-trip3 {
+				temperature = <40000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip4: chg-trip4 {
+				temperature = <41000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip5: chg-trip5 {
+				temperature = <42000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
+			chg_trip6: chg-trip6 {
+				temperature = <43000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+
 			skin_modem_trip0: modem-trip0 {
 				temperature = <43000>;
 				hysteresis = <4000>;
@@ -1247,6 +1289,34 @@
 			cdsp_cdev1 {
 				trip = <&skin_modem_trip1_hvx_gpu>;
 				cooling-device = <&cdsp_sw 4 4>;
+			};
+			chg_bat0 {
+				trip = <&chg_trip0>;
+				cooling-device = <&pm6150_charger 2 2>;
+			};
+			chg_bat1 {
+				trip = <&chg_trip1>;
+				cooling-device = <&pm6150_charger 6 6>;
+			};
+			chg_bat2 {
+				trip = <&chg_trip2>;
+				cooling-device = <&pm6150_charger 8 8>;
+			};
+			chg_bat3 {
+				trip = <&chg_trip3>;
+				cooling-device = <&pm6150_charger 9 9>;
+			};
+			chg_bat4 {
+				trip = <&chg_trip4>;
+				cooling-device = <&pm6150_charger 11 11>;
+			};
+			chg_bat5 {
+				trip = <&chg_trip5>;
+				cooling-device = <&pm6150_charger 13 13>;
+			};
+			chg_bat6 {
+				trip = <&chg_trip6>;
+				cooling-device = <&pm6150_charger 14 14>;
 			};
 		};
 	};

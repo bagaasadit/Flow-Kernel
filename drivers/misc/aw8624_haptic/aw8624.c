@@ -405,6 +405,54 @@ static int aw8624_rtp_update(struct aw8624 *aw8624)
 		aw8624_rtp_name[aw8624->rtp_file_num], aw8624_rtp_loaded);
 }
 
+static u16 aw8624_ram_wave_mask(const struct aw8624 *aw8624,
+				const struct aw8624_container *cont)
+{
+	const unsigned char *sram;
+	unsigned int shift = aw8624->ram.ram_shift;
+	unsigned int base = aw8624->ram.base_addr;
+	unsigned int sram_len, sa0, hdr_bytes, num_waves, eid, k;
+	u16 mask = 0;
+
+	if (!cont || cont->len <= shift + 5)
+		return 0;
+
+	sram = cont->data + shift;
+	sram_len = cont->len - shift;
+	sa0 = ((unsigned int)sram[1] << 8) | sram[2];
+	if (sa0 < base + 5)
+		return 0;
+
+	hdr_bytes = sa0 - base;
+	if (hdr_bytes >= sram_len || (hdr_bytes - 1) % 4 != 0)
+		return 0;
+
+	num_waves = (hdr_bytes - 1) / 4;
+	if (num_waves > AW8624_MAX_RAM_WAVES)
+		num_waves = AW8624_MAX_RAM_WAVES;
+
+	for (eid = 0; eid < num_waves; eid++) {
+		unsigned int off = 1 + eid * 4;
+		unsigned int sa = ((unsigned int)sram[off] << 8) | sram[off + 1];
+		unsigned int ea = ((unsigned int)sram[off + 2] << 8) | sram[off + 3];
+
+		/*
+		 * Single-byte placeholders (sa == ea) produce silent UI
+		 * effects; require multiple samples and a non-zero amplitude.
+		 */
+		if (ea <= sa || sa < base + hdr_bytes || ea - base >= sram_len)
+			continue;
+		for (k = sa - base; k <= ea - base; k++) {
+			if (sram[k]) {
+				mask |= (u16)(1U << eid);
+				break;
+			}
+		}
+	}
+
+	return mask;
+}
+
 static bool aw8624_container_update(struct aw8624 *aw8624,
 				    struct aw8624_container *aw8624_cont)
 {
@@ -460,6 +508,8 @@ static bool aw8624_container_update(struct aw8624 *aw8624,
 			 aw8624_cont->data[0 + shift]);
 	aw8624_i2c_write(aw8624, AW8624_REG_RAMADDRL,
 			 aw8624_cont->data[1 + shift]);
+	WRITE_ONCE(aw8624->ram_wave_valid_mask,
+		   aw8624_ram_wave_mask(aw8624, aw8624_cont));
 	shift = aw8624->ram.ram_shift;
 	for (i = shift; i < aw8624_cont->len; i++) {
 		aw8624_i2c_write(aw8624, AW8624_REG_RAMDATA,
@@ -1269,47 +1319,113 @@ static int16_t aw8624_haptic_effect_strength(struct aw8624 *aw8624,
 	return 0;
 }
 
+static int aw8624_pick_ram_wave(u16 valid_mask, const u8 *cands, size_t count,
+				int fallback)
+{
+	size_t i;
+	int eid;
+
+	if (!valid_mask)
+		return fallback;
+	for (i = 0; i < count; i++) {
+		if (cands[i] < AW8624_MAX_RAM_WAVES &&
+		    (valid_mask & (1U << cands[i])))
+			return cands[i];
+	}
+	for (eid = 0; eid < AW8624_MAX_RAM_WAVES; eid++) {
+		if (valid_mask & (1U << eid))
+			return eid;
+	}
+	return fallback;
+}
+
+static void aw8624_resolve_ram_effect(struct aw8624 *aw8624,
+				      int effect_id, int *seq0, int *seq2)
+{
+	static const u8 double_cands[] = { 9, 6, 0, 5 };
+	static const u8 tick_cands[] = { 6, 8, 9, 0 };
+	static const u8 pop_cands[] = { 9, 6, 8, 10, 0 };
+	static const u8 generic_cands[] = { 6, 0, 9, 8, 5 };
+	u16 valid_mask = READ_ONCE(aw8624->ram_wave_valid_mask);
+	int pulse;
+
+	*seq0 = effect_id;
+	*seq2 = -1;
+	if (!valid_mask || effect_id < 0 || effect_id >= AW8624_MAX_RAM_WAVES ||
+	    (valid_mask & (1U << effect_id)))
+		return;
+
+	if (effect_id == 1 || effect_id == 7) {
+		pulse = aw8624_pick_ram_wave(valid_mask, double_cands,
+					     ARRAY_SIZE(double_cands), -1);
+		if (pulse >= 0) {
+			*seq0 = pulse;
+			*seq2 = pulse;
+		}
+		return;
+	}
+
+	if (effect_id == 2)
+		*seq0 = aw8624_pick_ram_wave(valid_mask, tick_cands,
+					     ARRAY_SIZE(tick_cands), effect_id);
+	else if (effect_id == 4)
+		*seq0 = aw8624_pick_ram_wave(valid_mask, pop_cands,
+					     ARRAY_SIZE(pop_cands), effect_id);
+	else
+		*seq0 = aw8624_pick_ram_wave(valid_mask, generic_cands,
+					     ARRAY_SIZE(generic_cands),
+					     effect_id);
+}
+
 /* Caller holds aw8624->lock.  Do not overwrite the selected FF slot. */
 static void aw8624_haptic_play_ram(struct aw8624 *aw8624, int effect_id,
 				  u16 magnitude)
 {
-	aw8624_haptic_set_wav_seq(aw8624, 0x00, effect_id + 1);
-	aw8624_haptic_set_wav_seq(aw8624, 0x01, 0x00);
+	int seq0, seq2;
+
+	aw8624_resolve_ram_effect(aw8624, effect_id, &seq0, &seq2);
+	aw8624_haptic_set_wav_seq(aw8624, 0x00, seq0 + 1);
+	if (seq2 >= 0) {
+		/* Each WAIT tick is ~21ms at 24kHz RAM rate; 2 ticks ~= 42ms. */
+		aw8624_haptic_set_wav_seq(aw8624, 0x01,
+					  AW8624_BIT_WAVSEQ2_WAIT | 2);
+		aw8624_haptic_set_wav_seq(aw8624, 0x02, seq2 + 1);
+		aw8624_haptic_set_wav_seq(aw8624, 0x03, 0x00);
+	} else {
+		aw8624_haptic_set_wav_seq(aw8624, 0x01, 0x00);
+		aw8624_haptic_set_wav_seq(aw8624, 0x02, 0x00);
+	}
 	aw8624_haptic_set_wav_loop(aw8624, 0x00, 0x00);
+	aw8624_haptic_set_wav_loop(aw8624, 0x01, 0x00);
+	aw8624_haptic_set_wav_loop(aw8624, 0x02, 0x00);
 	aw8624_haptic_play_mode(aw8624, AW8624_HAPTIC_RAM_MODE);
 	aw8624_haptic_effect_strength(aw8624, magnitude);
 
 	/* Retain this tree's per-effect DT voltage calibration. */
 	if (aw8624->info.gain_flag && effect_id >= 0 &&
-	    effect_id < aw8624->effects_count &&
+	    effect_id < aw8624->effects_count && aw8624->predefined &&
 	    aw8624->predefined[effect_id].level)
 		aw8624->level = min_t(u32, 255,
 			DIV_ROUND_CLOSEST((u32)aw8624->level *
 					  aw8624->predefined[effect_id].level,
 					  AW8624_GAIN_FULL));
+	/* Prebaked RAM effects encode strength in magnitude, never FF_GAIN. */
+	WRITE_ONCE(aw8624->ff_gain, 0xffff);
 	aw8624_haptic_set_gain(aw8624, aw8624->level);
 	aw8624_haptic_start(aw8624);
 }
 
-static int aw8624_haptic_play_effect_seq(struct aw8624 *aw8624,
-					 unsigned char flag)
+static int aw8624_haptic_play_seq(struct aw8624 *aw8624, unsigned char flag,
+				  unsigned char activate_mode, int effect_id,
+				  u16 magnitude)
 {
-	unsigned long flags;
 	unsigned int seq;
-	u16 magnitude;
-	int effect_id;
-
-	/* playback() publishes the waveform ID and magnitude under this lock. */
-	spin_lock_irqsave(&aw8624->input_dev->event_lock, flags);
-	effect_id = aw8624->effect_id;
-	magnitude = aw8624->play.vmax_mv;
-	spin_unlock_irqrestore(&aw8624->input_dev->event_lock, flags);
 
 	if (effect_id < 0 || effect_id > aw8624->info.effect_id_boundary)
 		return 0;
-	if (flag && aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
+	if (flag && activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
 		aw8624_haptic_play_ram(aw8624, effect_id, magnitude);
-	} else if (flag && aw8624->activate_mode ==
+	} else if (flag && activate_mode ==
 		   AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE) {
 		seq = aw8624->info.effect_id_boundary;
 		if (aw8624->effects_count > 0 && seq >= aw8624->effects_count)
@@ -1326,6 +1442,25 @@ static int aw8624_haptic_play_effect_seq(struct aw8624 *aw8624,
 		aw8624_haptic_play_repeat_seq(aw8624, true);
 	}
 	return 0;
+}
+
+static int aw8624_haptic_play_effect_seq(struct aw8624 *aw8624,
+					 unsigned char flag)
+{
+	unsigned long flags;
+	unsigned char activate_mode;
+	u16 magnitude;
+	int effect_id;
+
+	/* playback() publishes the mode, waveform ID and magnitude under this lock. */
+	spin_lock_irqsave(&aw8624->input_dev->event_lock, flags);
+	activate_mode = aw8624->activate_mode;
+	effect_id = aw8624->effect_id;
+	magnitude = aw8624->play.vmax_mv;
+	spin_unlock_irqrestore(&aw8624->input_dev->event_lock, flags);
+
+	return aw8624_haptic_play_seq(aw8624, flag, activate_mode, effect_id,
+				      magnitude);
 }
 
 static void aw8624_haptic_upload_lra(struct aw8624 *aw8624, unsigned char flag)
@@ -1636,6 +1771,7 @@ static void aw8624_rtp_work_routine(struct work_struct *work)
 	    (unsigned int)(effect_id - AW8624_RTP_EFFECT_BASE) >=
 					ARRAY_SIZE(aw8624_rtp_name))
 		goto relax;
+	WRITE_ONCE(aw8624->ff_gain, 0xffff);
 	aw8624_haptic_effect_strength(aw8624, magnitude);
 	aw8624_haptic_set_gain(aw8624, aw8624->level);
 	aw8624->rtp_file_num = effect_id - AW8624_RTP_EFFECT_BASE;
@@ -2416,14 +2552,24 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 {
 	struct aw8624 *aw8624 =
 	    container_of(work, struct aw8624, vibrator_work);
+	unsigned long flags;
 	bool stop_rtp;
+	bool state;
+	unsigned char activate_mode;
+	int duration, effect_id;
+	u16 magnitude;
 
 	VIB_FUNC_ENTER();
-	VIB_DEBUG("state=%d activate_mode=%d duration=%d", aw8624->state,
-		  aw8624->activate_mode, aw8624->duration);
 	mutex_lock(&aw8624->lock);
-	if (READ_ONCE(aw8624->state) && !READ_ONCE(aw8624->suspended) &&
-	    READ_ONCE(aw8624->activate_mode) == AW8624_HAPTIC_ACTIVATE_RTP_MODE) {
+	spin_lock_irqsave(&aw8624->input_dev->event_lock, flags);
+	state = READ_ONCE(aw8624->state);
+	activate_mode = aw8624->activate_mode;
+	duration = aw8624->duration;
+	spin_unlock_irqrestore(&aw8624->input_dev->event_lock, flags);
+	VIB_DEBUG("state=%d activate_mode=%d duration=%d", state,
+		  activate_mode, duration);
+	if (state && !READ_ONCE(aw8624->suspended) &&
+	    activate_mode == AW8624_HAPTIC_ACTIVATE_RTP_MODE) {
 		mutex_unlock(&aw8624->lock);
 		return;
 	}
@@ -2441,41 +2587,52 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 	/* The old RTP stream no longer needs its timed wakeup source. */
 	if (stop_rtp)
 		pm_relax(aw8624->dev);
-	if (READ_ONCE(aw8624->state) && !READ_ONCE(aw8624->suspended)) {
-		if (aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
+	spin_lock_irqsave(&aw8624->input_dev->event_lock, flags);
+	state = READ_ONCE(aw8624->state);
+	activate_mode = aw8624->activate_mode;
+	duration = aw8624->duration;
+	effect_id = aw8624->effect_id;
+	magnitude = aw8624->play.vmax_mv;
+	spin_unlock_irqrestore(&aw8624->input_dev->event_lock, flags);
+	if (state && !READ_ONCE(aw8624->suspended)) {
+		bool timed = false;
+
+		if (activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
 			aw8624_haptic_ram_vbat_comp(aw8624, false);
-			aw8624_haptic_play_effect_seq(aw8624, true);
-		} else if (aw8624->activate_mode ==
+			aw8624_haptic_play_seq(aw8624, true, activate_mode,
+					       effect_id, magnitude);
+		} else if (activate_mode ==
 			   AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE) {
 			aw8624_haptic_ram_vbat_comp(aw8624, true);
-			aw8624_haptic_play_effect_seq(aw8624, true);
-			if (aw8624->duration <= 0)
-				aw8624->duration = AW8624_DEFAULT_PLAYBACK_MS;
-			if (READ_ONCE(aw8624->state) &&
-			    !READ_ONCE(aw8624->suspended))
-				hrtimer_start(&aw8624->timer,
-					      ktime_set(aw8624->duration / 1000,
-							(aw8624->duration % 1000) *
-							1000000),
-					      HRTIMER_MODE_REL);
-			else
-				aw8624_haptic_stop(aw8624);
-		} else if (aw8624->activate_mode ==
+			aw8624_haptic_play_seq(aw8624, true, activate_mode,
+					       effect_id, magnitude);
+			timed = true;
+		} else if (activate_mode ==
 			   AW8624_HAPTIC_ACTIVATE_CONT_MODE) {
 			aw8624_haptic_cont(aw8624);
-			if (aw8624->duration <= 0)
-				aw8624->duration = AW8624_DEFAULT_PLAYBACK_MS;
+			timed = true;
+		} else {
+			/*other mode */
+		}
+		if (timed) {
+			if (duration <= 0) {
+				duration = AW8624_DEFAULT_PLAYBACK_MS;
+				spin_lock_irqsave(&aw8624->input_dev->event_lock,
+						  flags);
+				if (aw8624->duration <= 0)
+					aw8624->duration = duration;
+				spin_unlock_irqrestore(&aw8624->input_dev->event_lock,
+						       flags);
+			}
 			if (READ_ONCE(aw8624->state) &&
 			    !READ_ONCE(aw8624->suspended))
 				hrtimer_start(&aw8624->timer,
-					      ktime_set(aw8624->duration / 1000,
-							(aw8624->duration % 1000) *
+					      ktime_set(duration / 1000,
+							(duration % 1000) *
 							1000000),
 					      HRTIMER_MODE_REL);
 			else
 				aw8624_haptic_stop(aw8624);
-		} else {
-			/*other mode */
 		}
 	}
 	mutex_unlock(&aw8624->lock);
@@ -2484,9 +2641,15 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 static void aw8624_gain_work_routine(struct work_struct *work)
 {
 	struct aw8624 *aw8624 = container_of(work, struct aw8624, gain_work);
+	unsigned long flags;
+	bool skip;
 
 	mutex_lock(&aw8624->lock);
-	if (!READ_ONCE(aw8624->suspended))
+	spin_lock_irqsave(&aw8624->input_dev->event_lock, flags);
+	skip = READ_ONCE(aw8624->state) &&
+	       aw8624->effect_type == FF_PERIODIC;
+	spin_unlock_irqrestore(&aw8624->input_dev->event_lock, flags);
+	if (!READ_ONCE(aw8624->suspended) && !skip)
 		aw8624_haptic_set_gain(aw8624, aw8624->applied_gain);
 	mutex_unlock(&aw8624->lock);
 }
@@ -3014,16 +3177,15 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 	}
 
 	if (effect->type == FF_CONSTANT) {
-		int level = effect->u.constant.level;
-
-		if (level < 0)
-			level = -level;
-		if (level > AW8624_STRONG_MAGNITUDE)
-			level = AW8624_STRONG_MAGNITUDE;
+		/*
+		 * Timed continuous effects rely on EV_FF/FF_GAIN for amplitude;
+		 * ignore effect->u.constant.level so QTI's VibratorOL HAL cannot
+		 * carry a prior FF_PERIODIC magnitude into the first keypress.
+		 */
 		uploaded.duration = effect->replay.length;
 		uploaded.activate_mode = AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE;
 		uploaded.effect_id = aw8624->info.effect_id_boundary;
-		uploaded.vmax_mv = level ? level : AW8624_STRONG_MAGNITUDE;
+		uploaded.vmax_mv = AW8624_STRONG_MAGNITUDE;
 	} else if (effect->type == FF_PERIODIC) {
 		if (copy_from_user(data, effect->u.periodic.custom_data,
 				   sizeof(data))) {
@@ -3063,11 +3225,18 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 
 		/* The HAL combines data[1] seconds and data[2] milliseconds. */
 		if (uploaded.activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
-			if (aw8624->effects_count > 0 && aw8624->predefined &&
-			    aw8624->predefined[uploaded.effect_id].play_rate_us) {
-				data[1] = aw8624->predefined[uploaded.effect_id].play_rate_us / 1000000;
-				data[2] = (aw8624->predefined[uploaded.effect_id].play_rate_us /
-					   1000) % 1000;
+			int seq0, seq2;
+			u32 play_us = 0;
+
+			aw8624_resolve_ram_effect(aw8624, uploaded.effect_id,
+						  &seq0, &seq2);
+			if (aw8624->effects_count > 0 && aw8624->predefined)
+				play_us = aw8624->predefined[uploaded.effect_id].play_rate_us;
+			if (seq2 >= 0 && play_us < 85000)
+				play_us = 85000;
+			if (play_us) {
+				data[1] = play_us / 1000000;
+				data[2] = (play_us / 1000) % 1000;
 			} else {
 				/* ponytail: fallback click timing when child nodes or rates are missing. */
 				data[1] = 0;
@@ -3129,6 +3298,8 @@ static int aw8624_haptics_playback(struct input_dev *dev, int effect_id,
 	if (uploaded->effect_type == FF_PERIODIC ||
 	    uploaded->effect_type == FF_CONSTANT)
 		aw8624->play.vmax_mv = uploaded->vmax_mv;
+	if (val <= 0 || uploaded->effect_type == FF_PERIODIC)
+		WRITE_ONCE(aw8624->ff_gain, 0xffff);
 	WRITE_ONCE(aw8624->state, val > 0);
 	aw8624->play_requested_at = ktime_get();
 	WRITE_ONCE(aw8624->play_generation, aw8624->play_generation + 1);
@@ -3167,6 +3338,8 @@ static int aw8624_haptics_erase(struct input_dev *dev, int effect_id)
 	spin_lock_irq(&dev->event_lock);
 	memset(&aw8624->ff_effects[effect_id], 0,
 	       sizeof(aw8624->ff_effects[effect_id]));
+	if (!READ_ONCE(aw8624->state))
+		WRITE_ONCE(aw8624->ff_gain, 0xffff);
 	spin_unlock_irq(&dev->event_lock);
 	return 0;
 }

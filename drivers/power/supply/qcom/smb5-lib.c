@@ -3032,10 +3032,8 @@ int smblib_set_prop_system_temp_level(struct smb_charger *chg,
 
 	rc = smblib_get_prop_from_bms(chg,
 				POWER_SUPPLY_PROP_TEMP, &batt_temp);
-	if (rc < 0) {
-		pr_err("Couldn't get batt temp rc=%d\n", rc);
-		return -EINVAL;
-	}
+	if (rc < 0)
+		batt_temp.intval = 0;
 	smblib_dbg(chg, PR_OEM, "thermal level:%d, batt temp:%d, thermal_levels:%d"
 					 "chg->system_temp_level:%d, charger_type:%d\n",
 					 val->intval, batt_temp.intval, chg->thermal_levels,

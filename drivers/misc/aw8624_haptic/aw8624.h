@@ -172,6 +172,8 @@ struct fileops {
 	unsigned char ram_addrl;
 };
 
+#define AW8624_MAX_RAM_WAVES		16
+
 struct ram {
 	unsigned int len;
 	unsigned int check_sum;
@@ -364,6 +366,8 @@ struct aw8624 {
 	u8 applied_gain;
 	/* Input FF gain: 0 is muted, 0xffff is unity. */
 	u16 ff_gain;
+	/* Bitmask of non-empty RAM waveform indices parsed from firmware. */
+	u16 ram_wave_valid_mask;
 	/* Playback callbacks hold input_dev->event_lock while updating this. */
 	u32 play_generation;
 	ktime_t play_requested_at;

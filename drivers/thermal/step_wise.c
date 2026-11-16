@@ -62,6 +62,9 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 	next_target = instance->target;
 	dev_dbg(&cdev->device, "cur_state=%ld\n", cur_state);
 
+	if (instance->lower == instance->upper)
+		return throttle ? instance->upper : THERMAL_NO_TARGET;
+
 	if (!instance->initialized) {
 		if (throttle) {
 			next_target = (cur_state + 1) >= instance->upper ?

@@ -135,7 +135,7 @@
 	};
 
 	quiet-therm-step {
-		status = "disabled";
+		status = "okay";
 	};
 };
 
