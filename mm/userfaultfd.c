@@ -27,10 +27,11 @@
  * This function handles both MCOPY_ATOMIC_NORMAL and _CONTINUE for both shmem
  * and anon, and for both shared and private VMAs.
  */
-int mfill_atomic_install_pte(struct mm_struct *dst_mm, pmd_t *dst_pmd,
-			     struct vm_area_struct *dst_vma,
-			     unsigned long dst_addr, struct page *page,
-			     bool newly_allocated, bool wp_copy)
+static int __mfill_atomic_install_pte(struct mm_struct *dst_mm, pmd_t *dst_pmd,
+				      struct vm_area_struct *dst_vma,
+				      unsigned long dst_addr, struct page *page,
+				      struct mem_cgroup *memcg,
+				      bool newly_allocated, bool wp_copy)
 {
 	int ret;
 	pte_t _dst_pte, *dst_pte;
@@ -71,6 +72,14 @@ int mfill_atomic_install_pte(struct mm_struct *dst_mm, pmd_t *dst_pmd,
 		page_add_new_anon_rmap(page, dst_vma, dst_addr, false);
 
 	/*
+	 * Commit memcg charge after page->mapping is valid (anon rmap set) and
+	 * before adding the page to the LRU or publishing the PTE, so the LRU
+	 * list update and charge accounting stay on the same memcg.
+	 */
+	if (memcg)
+		mem_cgroup_commit_charge(page, memcg, false, false);
+
+	/*
 	 * Must happen after rmap, as mm_counter() checks mapping (via
 	 * PageAnon()), which is set by __page_set_anon_rmap().
 	 */
@@ -87,6 +96,15 @@ int mfill_atomic_install_pte(struct mm_struct *dst_mm, pmd_t *dst_pmd,
 out_unlock:
 	pte_unmap_unlock(dst_pte, ptl);
 	return ret;
+}
+
+int mfill_atomic_install_pte(struct mm_struct *dst_mm, pmd_t *dst_pmd,
+			     struct vm_area_struct *dst_vma,
+			     unsigned long dst_addr, struct page *page,
+			     bool newly_allocated, bool wp_copy)
+{
+	return __mfill_atomic_install_pte(dst_mm, dst_pmd, dst_vma, dst_addr,
+					  page, NULL, newly_allocated, wp_copy);
 }
 
 static int mcopy_atomic_pte(struct mm_struct *dst_mm,
@@ -139,13 +157,12 @@ static int mcopy_atomic_pte(struct mm_struct *dst_mm,
 	if (mem_cgroup_try_charge(page, dst_mm, GFP_KERNEL, &memcg, false))
 		goto out_release;
 
-	ret = mfill_atomic_install_pte(dst_mm, dst_pmd, dst_vma, dst_addr,
-				       page, true, wp_copy);
+	ret = __mfill_atomic_install_pte(dst_mm, dst_pmd, dst_vma, dst_addr,
+					 page, memcg, true, wp_copy);
 	if (ret) {
 		mem_cgroup_cancel_charge(page, memcg, false);
 		goto out_release;
 	}
-	mem_cgroup_commit_charge(page, memcg, false, false);
 out:
 	return ret;
 out_release:
