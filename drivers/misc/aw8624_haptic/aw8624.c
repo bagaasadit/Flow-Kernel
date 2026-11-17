@@ -726,7 +726,7 @@ static int aw8624_haptic_stop_delay(struct aw8624 *aw8624)
 	unsigned int cnt;
 	int ret;
 
-	for (cnt = 0; cnt < 100; cnt++) {
+	for (cnt = 0; cnt < 300; cnt++) {
 		ret = aw8624_i2c_read(aw8624, AW8624_REG_GLB_STATE, &reg_val);
 		if (ret < 0)
 			return ret;
@@ -735,7 +735,7 @@ static int aw8624_haptic_stop_delay(struct aw8624 *aw8624)
 
 		pr_debug("%s wait for standby, reg glb_state=0x%02x\n",
 			 __func__, reg_val);
-		if (cnt < 99)
+		if (cnt < 299)
 			usleep_range(1000, 1500);
 	}
 	pr_err("%s do not enter standby automatically\n", __func__);

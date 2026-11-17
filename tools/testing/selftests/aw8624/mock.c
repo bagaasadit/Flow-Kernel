@@ -521,7 +521,7 @@ static void test_stop_delay(void)
 	stop_reads = stop_sleeps = 0;
 	stop_active_reads = 1000;
 	assert(aw8624_haptic_stop(&a) == -ETIMEDOUT);
-	assert(stop_reads == 100 && stop_sleeps == 99);
+	assert(stop_reads == 300 && stop_sleeps == 299);
 	assert(a.play_mode == AW8624_HAPTIC_STANDBY_MODE);
 	/* A missed standby must ask for exactly one rebuild. */
 	assert(a.recover_work.queued == 1);
