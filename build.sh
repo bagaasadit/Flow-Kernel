@@ -242,7 +242,7 @@ cp "$kimage" AnyKernel/Image
 cp "$dtb_src" AnyKernel/dtb
 cp out/arch/arm64/boot/dtbo.img AnyKernel/dtbo.img
 cd AnyKernel
-zip -r9 Flow-Kernel-v1.0.7-BakaSU-miatoll-${TANGGAL}.zip *
+zip -r9 Flow-Kernel-v1.0.8-BakaSU-miatoll-${TANGGAL}.zip *
 cd ../
 }
 compile

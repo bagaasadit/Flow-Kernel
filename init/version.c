@@ -22,12 +22,22 @@ extern int version_string(LINUX_VERSION_CODE);
 int version_string(LINUX_VERSION_CODE);
 #endif
 
+#ifdef CONFIG_FAKE_UNAME_5_15
+#ifdef CONFIG_LOCALVERSION
+#define FLOW_UTS_RELEASE	"5.15.207" CONFIG_LOCALVERSION
+#else
+#define FLOW_UTS_RELEASE	"5.15.207"
+#endif
+#else
+#define FLOW_UTS_RELEASE	UTS_RELEASE
+#endif
+
 struct uts_namespace init_uts_ns = {
 	.kref = KREF_INIT(2),
 	.name = {
 		.sysname	= UTS_SYSNAME,
 		.nodename	= UTS_NODENAME,
-		.release	= "5.15.207-Flow-v1.0.6",
+		.release	= FLOW_UTS_RELEASE,
 		.version	= UTS_VERSION,
 		.machine	= UTS_MACHINE,
 		.domainname	= UTS_DOMAINNAME,
@@ -42,7 +52,7 @@ EXPORT_SYMBOL_GPL(init_uts_ns);
 
 /* FIXED STRINGS! Don't touch! */
 const char linux_banner[] =
-	"Linux version 5.15.207-Flow-v1.0.6  (" LINUX_COMPILE_BY "@"
+	"Linux version " FLOW_UTS_RELEASE " (" LINUX_COMPILE_BY "@"
 	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
 
 const char linux_proc_banner[] =
