@@ -2120,6 +2120,12 @@ static __latent_entropy struct task_struct *copy_process(
 	proc_fork_connector(p);
 	sched_post_fork(p);
 	cgroup_post_fork(p);
+	if (IS_ENABLED(CONFIG_LRU_GEN) && !(clone_flags & CLONE_VM) && p->mm) {
+		/* Register mm under cgroup_threadgroup_rwsem before memcg migration can race */
+		task_lock(p);
+		lru_gen_add_mm(p->mm);
+		task_unlock(p);
+	}
 	cgroup_threadgroup_change_end(current);
 	perf_event_fork(p);
 
@@ -2278,13 +2284,6 @@ long _do_fork(struct kernel_clone_args *args)
 		p->vfork_done = &vfork;
 		init_completion(&vfork);
 		get_task_struct(p);
-	}
-
-	if (IS_ENABLED(CONFIG_LRU_GEN) && !(clone_flags & CLONE_VM)) {
-		/* lock the task to synchronize with memcg migration */
-		task_lock(p);
-		lru_gen_add_mm(p->mm);
-		task_unlock(p);
 	}
 
 	wake_up_new_task(p);
