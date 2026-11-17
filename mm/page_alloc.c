@@ -317,7 +317,12 @@ compound_page_dtor * const compound_page_dtors[] = {
  */
 int min_free_kbytes = 1024;
 int user_min_free_kbytes = -1;
-int watermark_scale_factor = 75;
+/*
+ * Keep a ~28 MB kswapd hysteresis band even when Android userspace writes 1
+ * alongside extra_free_kbytes, preventing premature lmkd low-watermark kills.
+ */
+#define MIN_WATERMARK_SCALE_FACTOR 50
+int watermark_scale_factor = MIN_WATERMARK_SCALE_FACTOR;
 
 /*
  * Extra memory for the system to try freeing. Used to temporarily
@@ -7408,14 +7413,27 @@ int min_free_kbytes_sysctl_handler(struct ctl_table *table, int write,
 int watermark_scale_factor_sysctl_handler(struct ctl_table *table, int write,
 		void *buffer, size_t *length, loff_t *ppos)
 {
-	int rc;
+	int val, rc;
+	struct ctl_table tmp;
 
-	rc = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (!write)
+		return proc_dointvec_minmax(table, write, buffer, length, ppos);
+
+	/*
+	 * Accept 1..1000 cleanly so vendor post-boot scripts do not fail,
+	 * while enforcing MIN_WATERMARK_SCALE_FACTOR as the effective floor.
+	 */
+	val = READ_ONCE(watermark_scale_factor);
+	tmp = *table;
+	tmp.data = &val;
+	rc = proc_dointvec_minmax(&tmp, write, buffer, length, ppos);
 	if (rc)
 		return rc;
 
-	if (write)
-		setup_per_zone_wmarks();
+	if (val < MIN_WATERMARK_SCALE_FACTOR)
+		val = MIN_WATERMARK_SCALE_FACTOR;
+	WRITE_ONCE(watermark_scale_factor, val);
+	setup_per_zone_wmarks();
 
 	return 0;
 }
