@@ -4,7 +4,7 @@
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=Flow Kernel v1.1.0 by bagaasadit
+kernel.string=Flow Kernel v1.1.1 by bagaasadit
 do.devicecheck=1
 do.modules=0
 do.systemless=1
@@ -32,7 +32,7 @@ PATCH_VBMETA_FLAG=auto;
 
 ui_print " ";
 ui_print "==================================";
-ui_print "        Flow Kernel v1.1.0        ";
+ui_print "        Flow Kernel v1.1.1        ";
 ui_print "          By bagaasadit           ";
 ui_print "==================================";
 
