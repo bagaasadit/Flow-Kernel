@@ -572,6 +572,6 @@ jobs:
               --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
               --latest
           fi
-          gh release view "${FLOW_VER}" --json tagName,name,isLatest,assets \
-            -q '.tagName + " | " + .name + " | latest=" + (.isLatest|tostring) + " | " + (.assets | map(.name + " " + (.size|tostring) + "B") | join(", "))'
+          gh release view "${FLOW_VER}" --json tagName,name,url,assets \
+            -q '.tagName + " | " + .name + " | " + .url + " | " + (.assets | map(.name + " " + (.size|tostring) + "B") | join(", "))'
 
