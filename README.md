@@ -1,0 +1,94 @@
+# Flow Kernel
+
+A tuned, stability-focused Linux kernel for Qualcomm Snapdragon 720G (`miatoll` / `SM7125`) devices — engineered around real telemetry to maximize sustained responsiveness, true multitasking memory retention, cool thermals, deep-sleep efficiency, and fast charging without placebo tweaks.
+
+[![Releases](https://img.shields.io/github/v/release/bagaasadit/Flow-Kernel?label=Latest%20Release&style=flat-square)](https://github.com/bagaasadit/Flow-Kernel/releases)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/bagaasadit/Flow-Kernel/build-kernel.yml?branch=main&label=CI%20Build&style=flat-square)](https://github.com/bagaasadit/Flow-Kernel/actions/workflows/build-kernel.yml)
+
+---
+
+## Supported Devices (`miatoll`)
+
+Unified AnyKernel3 package for all Snapdragon 720G (`atoll`) variants running **Android 11 – 17**:
+
+| Device | Codename |
+|---|---|
+| Redmi Note 9S | `curtana` |
+| Redmi Note 9 Pro (Global) | `joyeuse` |
+| Redmi Note 9 Pro Max | `excalibur` |
+| POCO M2 Pro | `gram` |
+
+---
+
+## Kernel Base & Version Identity
+
+* **True Kernel Source Base:** Linux `4.14.357` (Qualcomm `msm-4.14` / `atoll`) with targeted modern Linux 5.x/6.x subsystem backports (MGLRU, `BLK_WBT`, BBRv3, LZ4 v1.11, TEO cpuidle, SUSFS, etc.).
+* **Reported `uname -r` (`5.15.207-Flow-vX.Y.Z`):** Derived dynamically from `CONFIG_LOCALVERSION` under `CONFIG_FAKE_UNAME_5_15=y` in [`init/version.c`](init/version.c) so modern Android 15–17 ROMs, userspace tooling, and apps remain fully compatible.
+
+---
+
+## Key Features (Verified in Source)
+
+### Performance, Scheduling & 60Hz Smoothness
+* **QTI EAS (Kryo-465 Model) + 8ms PELT + `HZ=300`:** Balances snappy frame pacing with low power consumption.
+* **Direct `schedutil` Scaling & `SCHEDTUNE_BOOST_HOLD_ALL`:** Removes the 20% lower-OPP hysteresis in `get_next_freq()`, clamps `stale_ns` to a 12 ms floor for 60Hz frame continuity, and retains SchedTune boost across brief UI/RenderThread sleeps.
+* **Recalibrated `quiet-therm-step` Thermals:** 2-stage Gold CPU throttling (`45°C` soft step -> `1996.8 MHz`, `47°C` hard step -> `1708.8 MHz`), independent GPU thermal trips (`46°C`/`48°C` with `2°C` hysteresis), and tropical-friendly modem hysteresis (`2°C`) to prevent premature slowdown below 50% battery while keeping skin/battery temps cool.
+
+### Memory Management & Multitasking
+* **Fixed Multi-Gen LRU (MGLRU) with Working-Set Protection:** Includes generation aging & memcg migration race fixes, `kswapd` full-to-high-watermark reclaim, and default `lru_gen/min_ttl_ms = 1000` to protect active foreground apps.
+* **Widened `kswapd` Hysteresis Band:** `watermark_scale_factor` floor locked at `100` (`~56 MB` runway on 6 GB devices) cleanly overriding vendor `post_boot` resets (`1`) to eliminate premature `lmkd` low-watermark kills.
+* **Balanced Swapping & CMA Headroom:** `vm.swappiness` capped cleanly at `60` (overriding vendor `100`) with `LZ4` v1.11 zRAM, `kvzalloc` Android Binder buffers, and expanded `64 MiB` `reusable` `linux,cma` (`atoll.dtsi`) for bursty camera HDR/video allocations.
+
+### Storage (`UFS 2.1` + `F2FS`)
+* **Block Writeback Throttling (`CONFIG_BLK_WBT_SQ=y`):** Throttles heavy background buffered writes dynamically whenever interactive read/sync latency spikes, keeping messaging apps and SystemUI responsive under heavy file I/O.
+* **Bounded Writeback Queue:** Caps `dirty_background_bytes` at `32 MiB`, `dirty_bytes` at `128 MiB`, `dirty_writeback_centisecs` at `200`, and clamps `dirty_expire_centisecs` (`200..500`) cleanly against legacy ROM `init.rc` overrides.
+* **Flash-Tuned `deadline` I/O Scheduler:** `read_expire=100ms`, `write_expire=1500ms`, `writes_starved=4`, `fifo_batch=8`, and `front_merges=0`.
+
+### Battery, Deep Sleep & Charging
+* **Deep Sleep & Charger Wakeup Fixes:** Plugs unnecessary `charge_pump_master` / `smb1398` power-supply notifications when unplugged (`battery.c` & `smb1398-charger.c`) alongside `TEO` tickless deep C-state fixes and `CONFIG_RCU_FAST_NO_HZ=y`.
+* **Fast Charging:** Unlocked PD / HVDCP3.5 33W charging ceiling with calibrated PMIC charging thermal trips.
+
+### Root, Networking & Extras
+* **BakaSU + SUSFS + NoMount:** Inline-hooked KernelSU (BakaSU) with full SUSFS hiding hooks intact for banking compatibility.
+* **Networking:** `BBRv3` (`CONFIG_DEFAULT_BBR=y`) paired with `fq_codel` (`WESTWOOD` & `CUBIC` also built-in).
+* **Display & Haptics:** KCAL color calibration (`CONFIG_DRM_MSM_KCAL_CTRL=y`) and AW8624 balanced HAL `FF_GAIN` keyboard haptics with extended `stop_delay` poll reliability.
+
+---
+
+## Downloads & Releases
+
+Every release version has its own dedicated release page, flashable zip, SHA-256 checksum, and changelog:
+
+👉 **[GitHub Releases](https://github.com/bagaasadit/Flow-Kernel/releases)**
+
+---
+
+## Installation
+
+1. Download the desired `Flow-Kernel-vX.Y.Z-miatoll-BakaSU.zip` from **[Releases](https://github.com/bagaasadit/Flow-Kernel/releases)** and verify the SHA-256 checksum if desired.
+2. Flash in a custom recovery (TWRP/OrangeFox) or Kernel Flasher app (Franco Kernel Manager / Horizon Kernel Flasher).
+   * AnyKernel3 automatically backs up your current `boot` and `dtbo` images to `/sdcard/backup_boot.img` and `/sdcard/backup_dtbo.img` before flashing.
+3. Reboot to system. *(If your ROM needs BakaSU Manager or SUSFS userspace tools, manage them via your BakaSU manager app.)*
+
+---
+
+## Building from Source
+
+Flow Kernel builds using LLVM / **Neutron Clang** with ThinLTO + Polly (`CONFIG_LLVM_POLLY=y`, no GNU binutils).
+
+```bash
+git clone --depth=1 https://github.com/bagaasadit/Flow-Kernel.git -b main Flow-Kernel
+cd Flow-Kernel
+./build.sh
+```
+
+`build.sh` validates host prerequisites (`make`, `tar`, `zip`, `bc`, `bison`, `flex`, `zstd`, `curl`/`wget`), probes Polly support, clones BakaSU at the pinned commit, compiles `out/arch/arm64/boot/Image`, `cust-atoll-ab.dtb`, and `dtbo.img`, and packages `AnyKernel/Flow-Kernel-vX.Y.Z-BakaSU-miatoll-<timestamp>.zip`.
+
+---
+
+## Credits & License
+
+* Linux Kernel contributors & Qualcomm CAF / LineageOS `msm-4.14` (`atoll` / `miatoll`) base
+* [Baka-SU / BakaSU](https://github.com/Baka-SU/BakaSU) & SUSFS contributors
+* Neutron Toolchains, osm0sis (AnyKernel3), and upstream MGLRU / BBRv3 / BLK_WBT authors
+* Licensed under the **GNU General Public License v2.0 (GPLv2)** — see [COPYING](COPYING).

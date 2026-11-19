@@ -1,7 +1,9 @@
 # Flow Kernel CI — miatoll (SM7125 / atoll), arm64, 4.14
 #
 # Built standalone on main (BakaSU + SUSFS v2.4.0):
-#   * Publishes Flow-Kernel-v1.1.1-miatoll-BakaSU.zip as release asset on "latest"
+#   * Derives version dynamically from CONFIG_LOCALVERSION and publishes each
+#     version on its own dedicated release page (releases/tag/<version>) with
+#     per-version changelog & SHA-256 checksums.
 #   * BakaSU is NOT vendored: drivers/kernelsu is a symlink to
 #     ../KernelSU/kernel, and the driver is cloned here from Baka-SU/BakaSU.
 #   * Upstream credits & full GPLv2 commit history preserved.
@@ -49,7 +51,7 @@ env:
 
 jobs:
   build:
-    name: Build Flow Kernel v1.1.1 (miatoll, arm64, BakaSU-SUSFS)
+    name: Build Flow Kernel v1.2.0 (miatoll, arm64, BakaSU-SUSFS)
     runs-on: ubuntu-24.04
     # LTO + Polly on a 4 vCPU runner is slow; 6h is the GitHub maximum
     timeout-minutes: 360
@@ -63,8 +65,13 @@ jobs:
 
       - name: Show build inputs
         run: |
+          LOCALVER=$(sed -n 's/^CONFIG_LOCALVERSION=//p' arch/arm64/configs/vendor/xiaomi/miatoll_defconfig | tr -d '"')
+          FLOW_VER=${LOCALVER#-Flow-}
+          [ -n "$FLOW_VER" ] || FLOW_VER="unknown"
+          echo "FLOW_VER=${FLOW_VER}" >> "$GITHUB_ENV"
+          echo "EXPECTED_REL=5.15.207${LOCALVER}" >> "$GITHUB_ENV"
           {
-            echo "## Flow Kernel build inputs"
+            echo "## Flow Kernel ${FLOW_VER} build inputs"
             echo
             echo "| item | value |"
             echo "|---|---|"
@@ -73,7 +80,8 @@ jobs:
             echo "| commit | \`${{ github.sha }}\` |"
             echo "| kernel | \`$(awk -F' = ' '/^(VERSION|PATCHLEVEL|SUBLEVEL) = /{printf "%s.", $2}' Makefile | sed 's/\.$//')\` |"
             echo "| defconfig | \`vendor/xiaomi/miatoll_defconfig\` |"
-            echo "| localversion | \`$(sed -n 's/^CONFIG_LOCALVERSION=//p' arch/arm64/configs/vendor/xiaomi/miatoll_defconfig | tr -d '"')\` |"
+            echo "| localversion | \`${LOCALVER}\` |"
+            echo "| flow_ver | \`${FLOW_VER}\` |"
             echo "| neutron tag | \`${NEUTRON_TAG}\` |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -302,15 +310,16 @@ jobs:
             fi
           done
 
-          # Flow v1.1.0: verify fixed MGLRU and UI/MM responsiveness flags stay active
+          # Flow v1.1.0+ / v1.2.0: verify MGLRU, UI/MM responsiveness, and BLK_WBT flags stay active
           for sym in CONFIG_LRU_GEN CONFIG_LRU_GEN_ENABLED \
                      CONFIG_PELT_UTIL_HALFLIFE_8 \
                      CONFIG_BALANCE_ANON_FILE_RECLAIM CONFIG_HZ_300 \
-                     CONFIG_VM_EVENT_COUNTERS; do
+                     CONFIG_VM_EVENT_COUNTERS \
+                     CONFIG_BLK_WBT CONFIG_BLK_WBT_SQ; do
             if grep -qx "$sym=y" out/.config; then
               echo "  ok   $sym=y"
             else
-              echo "::error::$sym must stay enabled for Flow v1.1.0 MM/UI responsiveness"
+              echo "::error::$sym must stay enabled for Flow MM/UI/UFS responsiveness"
               fail=1
             fi
           done
@@ -402,7 +411,7 @@ jobs:
           ZIP=$(ls -1 AnyKernel/Flow-Kernel-*.zip | head -1)
           ls -lh "$ZIP"
           {
-            echo "## Flow Kernel v1.1.1 build artifact"
+            echo "## Flow Kernel ${FLOW_VER} build artifact"
             echo
             echo "| item | value |"
             echo "|---|---|"
@@ -419,7 +428,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Flow-Kernel-v1.1.1-BakaSU-miatoll
+          name: Flow-Kernel-${{ env.FLOW_VER }}-BakaSU-miatoll
           path: AnyKernel/Flow-Kernel-*.zip
           compression-level: 0
           if-no-files-found: error
@@ -502,22 +511,67 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # Publish standalone Flow Kernel BakaSU zip straight onto the 'latest' release.
-      - name: Publish Flow Kernel zip to the 'latest' release
+      # Publish Flow Kernel BakaSU zip on its own per-version GitHub Release page.
+      - name: Publish Flow Kernel per-version release
         if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/bakasu')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           SRC=$(ls -1 AnyKernel/Flow-Kernel-*.zip | head -1)
-          OUT="$RUNNER_TEMP/Flow-Kernel-v1.1.1-miatoll-BakaSU.zip"
+          OUT="$RUNNER_TEMP/Flow-Kernel-${FLOW_VER}-miatoll-BakaSU.zip"
           cp "$SRC" "$OUT"
           ls -lh "$SRC" "$OUT"
-          if ! gh release view latest >/dev/null 2>&1; then
-            gh release create latest "$OUT" --title "Latest" --notes "Automated Flow Kernel BakaSU CI builds"
+          export OUT
+          python3 - << 'PY' > "$RUNNER_TEMP/RELEASE_NOTES.md"
+          import hashlib, os, re, subprocess
+          flow_ver = os.environ["FLOW_VER"]
+          out_zip = os.environ["OUT"]
+          notes = ""
+          if os.path.isfile("CHANGELOG.md"):
+              with open("CHANGELOG.md", "r", encoding="utf-8") as f:
+                  text = f.read()
+              m = re.search(rf"^##\s+\[{re.escape(flow_ver)}\][^\n]*\n(.*?)(?=^##\s+\[|\Z)", text, re.M | re.S)
+              if m:
+                  notes = m.group(1).strip()
+          if not notes:
+              log = subprocess.check_output(["git", "log", "-n", "10", "--format=- %s (%h)"], text=True).strip()
+              notes = f"### Changes\n{log}"
+          h = hashlib.sha256()
+          with open(out_zip, "rb") as f:
+              for chunk in iter(lambda: f.read(65536), b""):
+                  h.update(chunk)
+          sha = h.hexdigest()
+          sz = os.path.getsize(out_zip)
+          img_sz = os.path.getsize("out/arch/arm64/boot/Image")
+          dtbo_sz = os.path.getsize("out/arch/arm64/boot/dtbo.img")
+          ksu = os.environ.get("KSU_COMMIT", "548d1dda")
+          uts = os.environ.get("EXPECTED_REL", f"5.15.207-Flow-{flow_ver}")
+          print(f"## Flow Kernel {flow_ver}\n")
+          print("**Device:** Xiaomi Snapdragon 720G (`miatoll`: `curtana`, `joyeuse`, `excalibur`, `gram`)  ")
+          print(f"**Kernel Base:** Linux `4.14.357` (UTS `{uts}`) • **Root / Hiding:** BakaSU (`{ksu}`) + SUSFS + NoMount\n")
+          print(notes)
+          print()
+          print("### Build Info & Checksum")
+          print("| Item | Value |")
+          print("|---|---|")
+          print(f"| Image / dtbo | {img_sz / 1048576:.2f} MB / {dtbo_sz / 1048576:.2f} MB |")
+          print(f"| Zip (`{os.path.basename(out_zip)}`) | {sz:,} bytes ({sz / 1048576:.2f} MB) |")
+          print(f"| SHA-256 | `{sha}` |")
+          PY
+          if gh release view "${FLOW_VER}" >/dev/null 2>&1; then
+            gh release upload "${FLOW_VER}" "$OUT" --clobber
+            gh release edit "${FLOW_VER}" \
+              --title "Flow Kernel ${FLOW_VER}" \
+              --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
+              --latest
           else
-            gh release upload latest "$OUT" --clobber
+            gh release create "${FLOW_VER}" "$OUT" \
+              --target "${{ github.sha }}" \
+              --title "Flow Kernel ${FLOW_VER}" \
+              --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
+              --latest
           fi
-          gh release view latest --json assets \
-            -q '.assets[] | .name + "  " + (.size|tostring) + " bytes"'
+          gh release view "${FLOW_VER}" --json tagName,name,isLatest,assets \
+            -q '.tagName + " | " + .name + " | latest=" + (.isLatest|tostring) + " | " + (.assets | map(.name + " " + (.size|tostring) + "B") | join(", "))'
 

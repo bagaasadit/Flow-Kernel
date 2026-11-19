@@ -236,13 +236,15 @@ exit 1
 fi
 
 echo -e " Kernel Compile Successful"
+FLOW_VER=$(sed -n 's/^CONFIG_LOCALVERSION="-Flow-\([^"]*\)"/\1/p' arch/arm64/configs/vendor/xiaomi/miatoll_defconfig)
+[ -n "$FLOW_VER" ] || FLOW_VER="v1.2.0"
 rm -rf AnyKernel
 cp -a AnyKernel3 AnyKernel
 cp "$kimage" AnyKernel/Image
 cp "$dtb_src" AnyKernel/dtb
 cp out/arch/arm64/boot/dtbo.img AnyKernel/dtbo.img
 cd AnyKernel
-zip -r9 Flow-Kernel-v1.1.1-BakaSU-miatoll-${TANGGAL}.zip *
+zip -r9 "Flow-Kernel-${FLOW_VER}-BakaSU-miatoll-${TANGGAL}.zip" *
 cd ../
 }
 compile
