@@ -1601,14 +1601,36 @@ static struct ctl_table kern_table[] = {
 	{ }
 };
 
+#define MAX_VM_SWAPPINESS 60
+
 static int proc_swappiness_handler(struct ctl_table *table, int write,
 				   void __user *buffer, size_t *lenp,
 				   loff_t *ppos)
 {
+	int val, rc;
+	struct ctl_table tmp;
+
 	if (task_is_booster(current))
 		return 0;
 
-	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (!write)
+		return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+
+	/*
+	 * Accept vendor post-boot writes (e.g. 100) cleanly without failing,
+	 * while capping effective vm_swappiness at MAX_VM_SWAPPINESS.
+	 */
+	val = READ_ONCE(vm_swappiness);
+	tmp = *table;
+	tmp.data = &val;
+	rc = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	if (rc)
+		return rc;
+
+	if (val > MAX_VM_SWAPPINESS)
+		val = MAX_VM_SWAPPINESS;
+	WRITE_ONCE(vm_swappiness, val);
+	return 0;
 }
 
 static struct ctl_table vm_table[] = {

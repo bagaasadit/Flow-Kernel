@@ -318,10 +318,11 @@ compound_page_dtor * const compound_page_dtors[] = {
 int min_free_kbytes = 1024;
 int user_min_free_kbytes = -1;
 /*
- * Keep a ~28 MB kswapd hysteresis band even when Android userspace writes 1
- * alongside extra_free_kbytes, preventing premature lmkd low-watermark kills.
+ * Keep a ~56 MB kswapd hysteresis band even when Android userspace writes 1
+ * alongside extra_free_kbytes, giving kswapd enough runway during bursty
+ * allocations (camera/ZArchiver) to avoid premature lmkd low-watermark kills.
  */
-#define MIN_WATERMARK_SCALE_FACTOR 50
+#define MIN_WATERMARK_SCALE_FACTOR 100
 int watermark_scale_factor = MIN_WATERMARK_SCALE_FACTOR;
 
 /*
