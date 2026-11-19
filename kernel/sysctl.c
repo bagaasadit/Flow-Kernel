@@ -1633,6 +1633,33 @@ static int proc_swappiness_handler(struct ctl_table *table, int write,
 	return 0;
 }
 
+static int proc_dirty_expire_handler(struct ctl_table *table, int write,
+				     void __user *buffer, size_t *lenp,
+				     loff_t *ppos)
+{
+	int val, rc;
+	struct ctl_table tmp;
+
+	if (!write)
+		return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+
+	/*
+	 * Accept init.rc (200) and init.target.rc (3000) cleanly while clamping
+	 * the effective dirty_expire_centisecs to 2..5s for bounded UFS flushes.
+	 */
+	val = READ_ONCE(dirty_expire_interval);
+	tmp = *table;
+	tmp.data = &val;
+	tmp.maxlen = sizeof(val);
+	rc = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	if (rc)
+		return rc;
+
+	val = clamp(val, 200, 500);
+	WRITE_ONCE(dirty_expire_interval, (unsigned int)val);
+	return 0;
+}
+
 static struct ctl_table vm_table[] = {
 	{
 		.procname	= "overcommit_memory",
@@ -1692,7 +1719,7 @@ static struct ctl_table vm_table[] = {
 		.procname	= "dirty_background_ratio",
 		.data		= &dirty_background_ratio,
 		.maxlen		= sizeof(dirty_background_ratio),
-		.mode		= 0444,
+		.mode		= 0644,
 		.proc_handler	= dirty_background_ratio_handler,
 		.extra1		= &zero,
 		.extra2		= &one_hundred,
@@ -1730,11 +1757,11 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= dirty_writeback_centisecs_handler,
 	},
 	{
-		.procname	= "dirty_expire_centisecs_nosys",
+		.procname	= "dirty_expire_centisecs",
 		.data		= &dirty_expire_interval,
 		.maxlen		= sizeof(dirty_expire_interval),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec_minmax,
+		.mode		= 0644,
+		.proc_handler	= proc_dirty_expire_handler,
 		.extra1		= &zero,
 	},
 	{

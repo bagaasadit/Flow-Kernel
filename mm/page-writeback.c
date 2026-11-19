@@ -72,13 +72,13 @@ static long ratelimit_pages = 32;
 /*
  * Start background writeback (via writeback threads) at this percentage
  */
-int dirty_background_ratio = 5;
+int dirty_background_ratio = 0;
 
 /*
- * dirty_background_bytes starts at 0 (disabled) so that it is a function of
- * dirty_background_ratio * the amount of dirtyable memory
+ * dirty_background_bytes starts at 32 MiB to cap dirty writeback queues on flash
+ * storage and prevent multi-hundred-MB write storms.
  */
-unsigned long dirty_background_bytes;
+unsigned long dirty_background_bytes = 32 * 1024 * 1024;
 
 /*
  * free highmem will not be subtracted from the total free memory
@@ -89,25 +89,25 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 20;
+int vm_dirty_ratio = 0;
 
 /*
- * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
- * vm_dirty_ratio * the amount of dirtyable memory
+ * vm_dirty_bytes starts at 128 MiB so foreground I/O stays responsive under
+ * sustained copies/extractions.
  */
-unsigned long vm_dirty_bytes;
+unsigned long vm_dirty_bytes = 128 * 1024 * 1024;
 
 /*
  * The interval between `kupdate'-style writebacks
  */
-unsigned int dirty_writeback_interval = 5 * 100; /* centiseconds */
+unsigned int dirty_writeback_interval = 2 * 100; /* centiseconds */
 
 EXPORT_SYMBOL_GPL(dirty_writeback_interval);
 
 /*
  * The longest time for which data is allowed to remain dirty
  */
-unsigned int dirty_expire_interval = 30 * 100; /* centiseconds */
+unsigned int dirty_expire_interval = 5 * 100; /* centiseconds */
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -531,6 +531,18 @@ int dirty_background_ratio_handler(struct ctl_table *table, int write,
         if (task_is_booster(current))
  		return 0;
 
+	/*
+	 * Preserve bounded dirty_background_bytes against legacy init.rc writes
+	 * to dirty_background_ratio while returning success cleanly.
+	 */
+	if (write && dirty_background_bytes) {
+		int val = 0;
+		struct ctl_table tmp = *table;
+
+		tmp.data = &val;
+		return proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	}
+
 	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 	if (ret == 0 && write)
 		dirty_background_bytes = 0;
@@ -548,6 +560,10 @@ int dirty_background_bytes_handler(struct ctl_table *table, int write,
 
 	ret = proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
 	if (ret == 0 && write) {
+		if (dirty_background_bytes)
+			dirty_background_bytes = clamp_t(unsigned long,
+					dirty_background_bytes,
+					8UL << 20, 64UL << 20);
 		if (DIV_ROUND_UP(dirty_background_bytes, PAGE_SIZE) >
 								UINT_MAX) {
 			dirty_background_bytes = old_bytes;
@@ -567,6 +583,15 @@ int dirty_ratio_handler(struct ctl_table *table, int write, void *buffer,
         if (task_is_booster(current))
  		return 0;
 
+	/* Preserve bounded vm_dirty_bytes against legacy ratio writes cleanly. */
+	if (write && vm_dirty_bytes) {
+		int val = 0;
+		struct ctl_table tmp = *table;
+
+		tmp.data = &val;
+		return proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	}
+
 	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 	if (ret == 0 && write && vm_dirty_ratio != old_ratio) {
 		writeback_set_ratelimit();
@@ -585,13 +610,18 @@ int dirty_bytes_handler(struct ctl_table *table, int write,
  		return 0;
 
 	ret = proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
-	if (ret == 0 && write && vm_dirty_bytes != old_bytes) {
-		if (DIV_ROUND_UP(vm_dirty_bytes, PAGE_SIZE) > UINT_MAX) {
-			vm_dirty_bytes = old_bytes;
-			return -ERANGE;
+	if (ret == 0 && write) {
+		if (vm_dirty_bytes)
+			vm_dirty_bytes = clamp_t(unsigned long, vm_dirty_bytes,
+						 32UL << 20, 256UL << 20);
+		if (vm_dirty_bytes != old_bytes) {
+			if (DIV_ROUND_UP(vm_dirty_bytes, PAGE_SIZE) > UINT_MAX) {
+				vm_dirty_bytes = old_bytes;
+				return -ERANGE;
+			}
+			writeback_set_ratelimit();
+			vm_dirty_ratio = 0;
 		}
-		writeback_set_ratelimit();
-		vm_dirty_ratio = 0;
 	}
 	return ret;
 }
