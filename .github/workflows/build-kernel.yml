@@ -48,6 +48,9 @@ env:
   CCACHE_COMPRESSLEVEL: 1
   KBUILD_BUILD_USER: bagaasadit
   KBUILD_BUILD_HOST: builder
+  BAKASU_APK_NAME: BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk
+  BAKASU_APK_URL: https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.0/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk
+  BAKASU_APK_SHA256: 43ccd6ec08844bf656b0800d84567c4f04412203446e6dada9570008f180fe25
 
 jobs:
   build:
@@ -511,7 +514,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # Publish Flow Kernel BakaSU zip on its own per-version GitHub Release page.
+      # Publish Flow Kernel BakaSU zip and BakaSU Manager APK on a per-version GitHub Release page.
       - name: Publish Flow Kernel per-version release
         if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/bakasu')
         env:
@@ -521,12 +524,18 @@ jobs:
           SRC=$(ls -1 AnyKernel/Flow-Kernel-*.zip | head -1)
           OUT="$RUNNER_TEMP/Flow-Kernel-${FLOW_VER}-miatoll-BakaSU.zip"
           cp "$SRC" "$OUT"
-          ls -lh "$SRC" "$OUT"
-          export OUT
+          APK_PATH="$RUNNER_TEMP/${BAKASU_APK_NAME}"
+          curl -fL --retry 3 --retry-delay 3 -o "$APK_PATH" "${BAKASU_APK_URL}"
+          echo "${BAKASU_APK_SHA256}  ${APK_PATH}" | sha256sum -c -
+          ls -lh "$SRC" "$OUT" "$APK_PATH"
+          export OUT APK_PATH
           python3 - << 'PY' > "$RUNNER_TEMP/RELEASE_NOTES.md"
           import hashlib, os, re, subprocess
           flow_ver = os.environ["FLOW_VER"]
           out_zip = os.environ["OUT"]
+          apk_path = os.environ["APK_PATH"]
+          apk_name = os.environ["BAKASU_APK_NAME"]
+          apk_sha = os.environ["BAKASU_APK_SHA256"]
           notes = ""
           if os.path.isfile("CHANGELOG.md"):
               with open("CHANGELOG.md", "r", encoding="utf-8") as f:
@@ -543,30 +552,41 @@ jobs:
                   h.update(chunk)
           sha = h.hexdigest()
           sz = os.path.getsize(out_zip)
+          apk_sz = os.path.getsize(apk_path)
           img_sz = os.path.getsize("out/arch/arm64/boot/Image")
           dtbo_sz = os.path.getsize("out/arch/arm64/boot/dtbo.img")
           ksu = os.environ.get("KSU_COMMIT", "548d1dda")
           uts = os.environ.get("EXPECTED_REL", f"5.15.207-Flow-{flow_ver}")
+          apk_dl = f"https://github.com/bagaasadit/Flow-Kernel/releases/download/{flow_ver}/{apk_name}"
           print(f"## Flow Kernel {flow_ver}\n")
           print("**Device:** Xiaomi Snapdragon 720G (`miatoll`: `curtana`, `joyeuse`, `excalibur`, `gram`)  ")
+          print("**Tested On:** Redmi Note 9 Pro (`joyeuse`, 6 GB / 64 GB) • Project Infinity-X 4.1 Vanilla (Android 17) + BiTGApps Core  ")
           print(f"**Kernel Base:** Linux `4.14.357` (UTS `{uts}`) • **Root / Hiding:** BakaSU (`{ksu}`) + SUSFS + NoMount\n")
           print(notes)
           print()
+          print("### Root Manager (BakaSU)")
+          print("This kernel ships with **BakaSU** (KernelSU + SUSFS). Install the matching manager APK below to manage root access and modules:")
+          print(f"* **Download BakaSU Manager:** [{apk_name}]({apk_dl})\n")
           print("### Build Info & Checksum")
           print("| Item | Value |")
           print("|---|---|")
           print(f"| Image / dtbo | {img_sz / 1048576:.2f} MB / {dtbo_sz / 1048576:.2f} MB |")
           print(f"| Zip (`{os.path.basename(out_zip)}`) | {sz:,} bytes ({sz / 1048576:.2f} MB) |")
-          print(f"| SHA-256 | `{sha}` |")
+          print(f"| SHA-256 (Kernel Zip) | `{sha}` |")
+          print(f"| Manager APK (`{apk_name}`) | {apk_sz:,} bytes ({apk_sz / 1048576:.2f} MB) |")
+          print(f"| SHA-256 (Manager APK) | `{apk_sha}` |\n")
+          print("### Disclaimer (DYOR)")
+          print("> **Do Your Own Research — Flash at Your Own Risk.**  ")
+          print("> Modifying your device's kernel carries inherent risks. Always back up your `boot`, `dtbo`, and important personal data before flashing. The maintainer assumes no responsibility for bricked devices, data loss, hardware damage, or ROM/banking incompatibilities.")
           PY
           if gh release view "${FLOW_VER}" >/dev/null 2>&1; then
-            gh release upload "${FLOW_VER}" "$OUT" --clobber
+            gh release upload "${FLOW_VER}" "$OUT" "$APK_PATH" --clobber
             gh release edit "${FLOW_VER}" \
               --title "Flow Kernel ${FLOW_VER}" \
               --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
               --latest
           else
-            gh release create "${FLOW_VER}" "$OUT" \
+            gh release create "${FLOW_VER}" "$OUT" "$APK_PATH" \
               --target "${{ github.sha }}" \
               --title "Flow Kernel ${FLOW_VER}" \
               --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \

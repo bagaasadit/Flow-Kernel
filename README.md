@@ -18,6 +18,11 @@ Unified AnyKernel3 package for all Snapdragon 720G (`atoll`) variants running **
 | Redmi Note 9 Pro Max | `excalibur` |
 | POCO M2 Pro | `gram` |
 
+### Test Environment
+While the unified `miatoll` build supports all four variants above, all telemetry profiling and multi-cycle stability benchmarks are validated on:
+* **Device:** Redmi Note 9 Pro (`joyeuse`) — 6 GB RAM / 64 GB UFS
+* **ROM & GApps:** Project Infinity-X 4.1 Vanilla (Android 17) + BiTGApps Core
+
 ---
 
 ## Kernel Base & Version Identity
@@ -57,18 +62,27 @@ Unified AnyKernel3 package for all Snapdragon 720G (`atoll`) variants running **
 
 ## Downloads & Releases
 
-Every release version has its own dedicated release page, flashable zip, SHA-256 checksum, and changelog:
+Every release version has its own dedicated release page containing the flashable kernel zip, matching **BakaSU Manager APK**, SHA-256 checksums, and per-version changelog:
 
-👉 **[GitHub Releases](https://github.com/bagaasadit/Flow-Kernel/releases)**
+* **All Releases (Per-Version):** 👉 **[GitHub Releases](https://github.com/bagaasadit/Flow-Kernel/releases)**
+* **BakaSU Manager APK (`v4.2.0-rc3`):** [BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk](https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.0/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk)  
+  SHA-256: `43ccd6ec08844bf656b0800d84567c4f04412203446e6dada9570008f180fe25`
 
 ---
 
 ## Installation
 
-1. Download the desired `Flow-Kernel-vX.Y.Z-miatoll-BakaSU.zip` from **[Releases](https://github.com/bagaasadit/Flow-Kernel/releases)** and verify the SHA-256 checksum if desired.
-2. Flash in a custom recovery (TWRP/OrangeFox) or Kernel Flasher app (Franco Kernel Manager / Horizon Kernel Flasher).
+1. Download `Flow-Kernel-vX.Y.Z-miatoll-BakaSU.zip` **and** `BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk` from the version's page under **[Releases](https://github.com/bagaasadit/Flow-Kernel/releases)** (verify the SHA-256 checksums if desired).
+2. Flash the kernel zip in a custom recovery (TWRP/OrangeFox) or a Kernel Flasher app (Franco Kernel Manager / Horizon Kernel Flasher).
    * AnyKernel3 automatically backs up your current `boot` and `dtbo` images to `/sdcard/backup_boot.img` and `/sdcard/backup_dtbo.img` before flashing.
-3. Reboot to system. *(If your ROM needs BakaSU Manager or SUSFS userspace tools, manage them via your BakaSU manager app.)*
+3. Reboot to system and install **BakaSU Manager** (`BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk`) to manage root access, modules, and SUSFS configuration.
+
+---
+
+## Disclaimer (DYOR)
+
+> **Do Your Own Research — Flash at Your Own Risk.**  
+> Custom kernels modify low-level hardware, memory, thermal, and power behavior. Although every release is tested thoroughly on `Redmi Note 9 Pro (6/64)` running `Infinity-X 4.1 Vanilla (Android 17) + BiTGApps Core`, you are responsible for verifying compatibility with your own ROM/setup and backing up your `boot`, `dtbo`, and important data before flashing. The maintainer assumes no liability for bootloops, data loss, hardware issues, or banking/Play Integrity changes.
 
 ---
 
