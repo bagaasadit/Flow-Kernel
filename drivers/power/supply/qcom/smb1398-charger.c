@@ -1311,8 +1311,9 @@ static int smb1398_div2_cp_ilim_vote_cb(struct votable *votable,
 		vote(chip->div2_cp_disable_votable, ILIM_VOTER, false, 0);
 	}
 
-	/* Notify userspace ILIM changed */
-	if (chip->div2_cp_master_psy)
+	/* Notify userspace ILIM changed only while charger or switcher is active */
+	if (chip->div2_cp_master_psy &&
+	    (READ_ONCE(chip->usb_present) || chip->switcher_en))
 		power_supply_changed(chip->div2_cp_master_psy);
 
 	return 0;
@@ -1527,7 +1528,7 @@ static int smb1390_get_fastcharge_mode(struct smb1398_chip *chip)
 		pr_err("Couldn't write fastcharge mode:%d\n", rc);
 		return rc;
 	}
-	pr_err("pval.intval: %d\n", pval.intval);
+	dev_dbg(chip->dev, "pval.intval: %d\n", pval.intval);
 
 	return pval.intval;
 }
@@ -1707,7 +1708,7 @@ static void smb1398_status_change_work(struct work_struct *work)
 					chip->taper_work_running = true;
 					queue_work(system_long_wq,
 						&chip->taper_work);
-					pr_err("start taper_work\n");
+					dev_dbg(chip->dev, "start taper_work\n");
 				}
 			}
 		}
@@ -1727,7 +1728,9 @@ static int smb1398_notifier_cb(struct notifier_block *nb,
 	if (event != PSY_EVENT_PROP_CHANGED)
 		return NOTIFY_OK;
 
-	if (strcmp(psy->desc->name, "battery") == 0 &&
+	if ((strcmp(psy->desc->name, "battery") == 0 ||
+	     strcmp(psy->desc->name, "main") == 0 ||
+	     strcmp(psy->desc->name, "cp_slave") == 0) &&
 	    !READ_ONCE(chip->usb_present))
 		return NOTIFY_OK;
 

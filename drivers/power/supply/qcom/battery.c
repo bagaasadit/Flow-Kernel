@@ -1028,13 +1028,19 @@ static int pl_fcc_vote_callback(struct votable *votable, void *data,
 	}
 
 	rerun_election(chip->pl_disable_votable);
-	/* When FCC changes, trigger psy changed event for CC mode */
+	/* When FCC changes, trigger psy changed event for CC mode only if USB is present */
 	if (!chip->cp_master_psy)
 		chip->cp_master_psy =
 			power_supply_get_by_name("charge_pump_master");
 
-	if (chip->cp_master_psy)
-		power_supply_changed(chip->cp_master_psy);
+	if (chip->cp_master_psy && is_usb_available(chip)) {
+		union power_supply_propval usb_pval = {0, };
+
+		if (!power_supply_get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_PRESENT, &usb_pval) &&
+		    usb_pval.intval)
+			power_supply_changed(chip->cp_master_psy);
+	}
 
 	return 0;
 }
