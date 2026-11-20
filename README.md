@@ -41,8 +41,8 @@ While the unified `miatoll` build supports all four variants above, all telemetr
 
 ### Memory Management & Multitasking
 * **Fixed Multi-Gen LRU (MGLRU) with Working-Set Protection:** Includes generation aging & memcg migration race fixes, `kswapd` full-to-high-watermark reclaim, and default `lru_gen/min_ttl_ms = 1000` to protect active foreground apps.
-* **Widened `kswapd` Hysteresis Band:** `watermark_scale_factor` floor locked at `100` (`~56 MB` runway on 6 GB devices) cleanly overriding vendor `post_boot` resets (`1`) to eliminate premature `lmkd` low-watermark kills.
-* **Balanced Swapping & CMA Headroom:** `vm.swappiness` capped cleanly at `60` (overriding vendor `100`) with `LZ4` v1.11 zRAM, `kvzalloc` Android Binder buffers, and expanded `64 MiB` `reusable` `linux,cma` (`atoll.dtsi`) for bursty camera HDR/video allocations.
+* **Widened & Decoupled Watermarks:** `WMARK_LOW` decoupled from `watermark_scale_factor` (`~46 MB` `LOW`, `~102 MB` `HIGH` on 6 GB devices) with `watermark_scale_factor` floor locked at `100` (`~56 MB` `kswapd` runway) to prevent premature `lmkd` low-watermark kills.
+* **4 GiB `LZ4` zRAM & Order-4 Proactive Compaction:** Pure-kernel `4 GiB` `zram0` floor on 6+ GB variants paired with `vm.swappiness` capped cleanly at `60` (`kvzalloc` Binder buffers, `64 MiB` `reusable` `linux,cma`) and Deep-Sleep-safe gentle order-4 (`64 KiB`) proactive compaction (`vm.compaction_proactiveness = 20`) to eliminate swap thrashing and allocation stalls.
 
 ### Storage (`UFS 2.1` + `F2FS`)
 * **Block Writeback Throttling (`CONFIG_BLK_WBT_SQ=y`):** Throttles heavy background buffered writes dynamically whenever interactive read/sync latency spikes, keeping messaging apps and SystemUI responsive under heavy file I/O.
@@ -56,7 +56,7 @@ While the unified `miatoll` build supports all four variants above, all telemetr
 ### Root, Networking & Extras
 * **BakaSU + SUSFS + NoMount:** Inline-hooked KernelSU (BakaSU) with full SUSFS hiding hooks intact for banking compatibility.
 * **Networking:** `BBRv3` (`CONFIG_DEFAULT_BBR=y`) paired with `fq_codel` (`WESTWOOD` & `CUBIC` also built-in).
-* **Display & Haptics:** KCAL color calibration (`CONFIG_DRM_MSM_KCAL_CTRL=y`) and AW8624 balanced HAL `FF_GAIN` keyboard haptics with extended `stop_delay` poll reliability.
+* **Display & Haptics:** KCAL color calibration (`CONFIG_DRM_MSM_KCAL_CTRL=y`), refined AW8624 perceptual gain curve (`0x44`/`0x6C`/`0x74`) + `wf_10` `3300 mV` tuning for firmer Back Gesture feedback, 5s-cached `ram_vbat_comp` voltage compensation, and extended `stop_delay` poll reliability.
 
 ---
 
@@ -65,7 +65,7 @@ While the unified `miatoll` build supports all four variants above, all telemetr
 Every release version has its own dedicated release page containing the flashable kernel zip, matching **BakaSU Manager APK**, SHA-256 checksums, and per-version changelog:
 
 * **All Releases (Per-Version):** 👉 **[GitHub Releases](https://github.com/bagaasadit/Flow-Kernel/releases)**
-* **BakaSU Manager APK (`v4.2.0-rc3`):** [BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk](https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.0/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk)  
+* **BakaSU Manager APK (`v4.2.0-rc3`):** [BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk](https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.1/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk)  
   SHA-256: `43ccd6ec08844bf656b0800d84567c4f04412203446e6dada9570008f180fe25`
 
 ---

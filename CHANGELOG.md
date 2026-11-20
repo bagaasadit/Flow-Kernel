@@ -4,6 +4,18 @@ All notable releases of **Flow Kernel** (`miatoll` / SM7125) are documented in t
 
 ---
 
+## [v1.2.1] - 2026-11-20
+
+### Memory Management & Multitasking
+- **mm/page_alloc:** Decouple `WMARK_LOW` from `watermark_scale_factor` when Android's `extra_free_kbytes` already supplies a low-watermark cushion (`~46 MB` `WMARK_LOW` / `~102 MB` `WMARK_HIGH` on 6 GB `miatoll`), eliminating `~95 MB` double-stacking that triggered premature `lmkd` kills while preserving the full `56 MB` `kswapd` runway (`MIN_WATERMARK_SCALE_FACTOR = 100`).
+- **drivers/block/zram (`zram_drv.c`):** Enforce a pure-kernel `4 GiB` `zram0` disksize floor on `>=5 GiB` RAM `miatoll` variants while keeping fast `LZ4` compression and leaving `4 GiB` devices untouched, preventing early zRAM saturation and `<300 MB SwapFree` `lmkd` storms.
+- **mm/compaction & kernel/sysctl:** Add Deep-Sleep-safe gentle order-4 (`64 KiB`) Proactive Compaction (`vm.compaction_proactiveness = 20`) running non-blocking `MIGRATE_ASYNC` passes with `2s..32s` exponential backoff, `WMARK_LOW` deferral, freezable sleep (`wait_event_freezable_timeout`, zero suspend wakeups), and zero `psi_memstall` inflation to eliminate `compact_stall`/`allocstall` UI micro-freezes.
+
+### Haptics (`AW8624`)
+- **drivers/misc/aw8624_haptic & dts/cust-atoll-idp:** Refine AW8624 perceptual gain curve (`LIGHT=0x44`, `MEDIUM=0x6C`, `STRONG=0x74`) and tune `wf_10` to `3300 mV` for firmer Back Gesture (`CLICK`/`TICK`) feedback without overdriven keyboard/timed rumble; fix and enable 5s-cached `ram_vbat_comp` across both `RAM_MODE` and `RAM_LOOP_MODE` with `0x80` non-clipping clamping, and update AW8624 selftests (`mock.c`) to verify voltage compensation and gain scaling.
+
+---
+
 ## [v1.2.0] - 2026-11-19
 
 ### Memory Management & Multitasking
