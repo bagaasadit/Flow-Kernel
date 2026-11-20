@@ -7305,10 +7305,20 @@ static void __setup_per_zone_wmarks(void)
 			    mult_frac(zone->managed_pages,
 				      watermark_scale_factor, 10000));
 
-		zone->watermark[WMARK_LOW]  = min_wmark_pages(zone) +
-					low + min;
-		zone->watermark[WMARK_HIGH] = min_wmark_pages(zone) +
-					low + min * 2;
+		/*
+		 * Decouple WMARK_LOW from watermark_scale_factor when Android's
+		 * extra_free_kbytes already reserves a low-watermark cushion,
+		 * avoiding double-stacking that inflates WMARK_LOW (~95 MB) and
+		 * triggers premature lmkd kills while preserving the full
+		 * watermark_scale_factor kswapd runway between LOW and HIGH.
+		 */
+		if (low)
+			zone->watermark[WMARK_LOW] = min_wmark_pages(zone) +
+						     low + (min >> 3);
+		else
+			zone->watermark[WMARK_LOW] = min_wmark_pages(zone) +
+						     (min >> 1);
+		zone->watermark[WMARK_HIGH] = zone->watermark[WMARK_LOW] + min;
 
 		spin_unlock_irqrestore(&zone->lock, flags);
 	}

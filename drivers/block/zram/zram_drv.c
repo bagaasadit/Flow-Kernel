@@ -24,6 +24,7 @@
 #include <linux/device.h>
 #include <linux/genhd.h>
 #include <linux/highmem.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/backing-dev.h>
 #include <linux/string.h>
@@ -1745,6 +1746,21 @@ static ssize_t disksize_store(struct device *dev,
 	}
 
 	disksize = PAGE_ALIGN(disksize);
+	/*
+	 * Android's mmd_setup defaults to a 50% (3 GiB) zRAM disksize on
+	 * 6 GiB miatoll devices, saturating >95% under heavy multitasking
+	 * and triggering lmkd swap-low kills while >900 MiB MemAvailable
+	 * remains. Enforce a 4 GiB floor on zram0 for >=5 GiB RAM devices
+	 * while keeping fast LZ4 compression and protecting 4 GiB variants.
+	 */
+	if (zram->disk->first_minor == 0 &&
+	    totalram_pages >= (4500UL << (20 - PAGE_SHIFT)) &&
+	    disksize >= (1ULL << 30) &&
+	    disksize < (4ULL << 30)) {
+		pr_info("zram0: raising disksize floor from %llu to %llu bytes\n",
+			disksize, 4ULL << 30);
+		disksize = 4ULL << 30;
+	}
 	if (!zram_meta_alloc(zram, disksize)) {
 		err = -ENOMEM;
 		goto out_unlock;

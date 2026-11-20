@@ -1916,6 +1916,172 @@ void compaction_unregister_node(struct node *node)
 }
 #endif /* CONFIG_SYSFS && CONFIG_NUMA */
 
+/*
+ * Gentle order-4 (64 KiB) proactive compaction for mobile multitasking:
+ * prevents Buddy >= order-4 exhaustion (direct compact_stall freezes)
+ * without THP order-9 overhead, without inflating PSI memstall, and with
+ * full freezer compatibility (0 Deep Sleep wakeups).
+ */
+#define PROACTIVE_COMPACT_ORDER		4
+#define COMPACT_PROACTIVE_BASE_MS	2000U
+#define COMPACT_PROACTIVE_MAX_MS	32000U
+
+int sysctl_compaction_proactiveness = 20;
+
+static unsigned int fragmentation_score_zone(struct zone *zone)
+{
+	unsigned long free_pages = zone_page_state(zone, NR_FREE_PAGES);
+	unsigned long suitable_pages = 0;
+	unsigned int order;
+
+	if (!free_pages)
+		return 0;
+
+	for (order = PROACTIVE_COMPACT_ORDER; order < MAX_ORDER; order++)
+		suitable_pages += zone->free_area[order].nr_free << order;
+
+	if (suitable_pages >= free_pages)
+		return 0;
+
+	return (unsigned int)(((free_pages - suitable_pages) * 100UL) /
+			      free_pages);
+}
+
+static unsigned int fragmentation_score_node(pg_data_t *pgdat)
+{
+	unsigned long managed_total = 0;
+	unsigned int score = 0;
+	int zoneid;
+
+	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
+		struct zone *zone = &pgdat->node_zones[zoneid];
+
+		if (!populated_zone(zone))
+			continue;
+		managed_total += zone->managed_pages;
+	}
+
+	if (!managed_total)
+		return 0;
+
+	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
+		struct zone *zone = &pgdat->node_zones[zoneid];
+
+		if (!populated_zone(zone))
+			continue;
+		score += mult_frac(fragmentation_score_zone(zone),
+				   zone->managed_pages, managed_total);
+	}
+
+	return min(score, 100U);
+}
+
+/*
+ * Run at most one non-blocking MIGRATE_ASYNC order-4 pass per populated zone
+ * when node external fragmentation exceeds the high threshold (100 - p + 10)
+ * until it drops back below the low threshold (100 - p).
+ * Returns true only when fragmentation strictly improved and remains above
+ * wmark_low (signalling kcompactd to stay at base interval instead of backing off).
+ */
+static bool proactive_compact_node(pg_data_t *pgdat, bool *active)
+{
+	int proactiveness = clamp(READ_ONCE(sysctl_compaction_proactiveness),
+				  0, 100);
+	unsigned int wmark_low, wmark_high, score, new_score;
+	int zoneid;
+
+	if (!proactiveness) {
+		*active = false;
+		return false;
+	}
+
+	wmark_low = 100U - (unsigned int)proactiveness;
+	wmark_high = min(wmark_low + 10U, 100U);
+	score = fragmentation_score_node(pgdat);
+
+	if (score <= wmark_low) {
+		*active = false;
+		return false;
+	}
+
+	if (score > wmark_high)
+		*active = true;
+
+	if (!*active)
+		return false;
+
+	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
+		struct zone *zone = &pgdat->node_zones[zoneid];
+		struct compact_control cc = {
+			.order = PROACTIVE_COMPACT_ORDER,
+			.classzone_idx = zoneid,
+			.mode = MIGRATE_ASYNC,
+			.ignore_skip_hint = false,
+			.whole_zone = false,
+			.gfp_mask = GFP_KERNEL,
+		};
+
+		if (!populated_zone(zone))
+			continue;
+
+		if (kthread_should_stop())
+			return false;
+
+		/* Never compete with kswapd when free pages are below WMARK_LOW. */
+		if (!zone_watermark_ok(zone, 0,
+				       low_wmark_pages(zone) +
+				       compact_gap(PROACTIVE_COMPACT_ORDER),
+				       zoneid, 0))
+			continue;
+
+		if (fragmentation_score_zone(zone) <= wmark_low)
+			continue;
+
+		if (compaction_suitable(zone, cc.order, 0, zoneid) !=
+							COMPACT_CONTINUE)
+			continue;
+
+		cc.zone = zone;
+		compact_zone(zone, &cc);
+
+		count_compact_events(KCOMPACTD_MIGRATE_SCANNED,
+				     cc.total_migrate_scanned);
+		count_compact_events(KCOMPACTD_FREE_SCANNED,
+				     cc.total_free_scanned);
+
+		VM_BUG_ON(!list_empty(&cc.freepages));
+		VM_BUG_ON(!list_empty(&cc.migratepages));
+	}
+
+	new_score = fragmentation_score_node(pgdat);
+	if (new_score <= wmark_low) {
+		*active = false;
+		return false;
+	}
+
+	return new_score < score;
+}
+
+int compaction_proactiveness_sysctl_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *length, loff_t *ppos)
+{
+	int ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (!ret && write && READ_ONCE(sysctl_compaction_proactiveness) > 0) {
+		int nid;
+
+		for_each_online_node(nid) {
+			pg_data_t *pgdat = NODE_DATA(nid);
+
+			if (pgdat && pgdat->kcompactd)
+				wake_up_interruptible(&pgdat->kcompactd_wait);
+		}
+	}
+
+	return ret;
+}
+
 static inline bool kcompactd_work_requested(pg_data_t *pgdat)
 {
 	return pgdat->kcompactd_max_order > 0 || kthread_should_stop();
@@ -2043,8 +2209,10 @@ void wakeup_kcompactd(pg_data_t *pgdat, int order, int classzone_idx)
  */
 static int kcompactd(void *p)
 {
-	pg_data_t *pgdat = (pg_data_t*)p;
+	pg_data_t *pgdat = (pg_data_t *)p;
 	struct task_struct *tsk = current;
+	unsigned int proactive_delay_ms = COMPACT_PROACTIVE_BASE_MS;
+	bool proactive_active = false;
 
 	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
 
@@ -2058,11 +2226,49 @@ static int kcompactd(void *p)
 
 	while (!kthread_should_stop()) {
 		unsigned long pflags;
+		int proactiveness = READ_ONCE(sysctl_compaction_proactiveness);
 
 		trace_mm_compaction_kcompactd_sleep(pgdat->node_id);
-		wait_event_freezable(pgdat->kcompactd_wait,
-				kcompactd_work_requested(pgdat));
+		if (proactiveness > 0) {
+			long ret;
 
+			ret = wait_event_freezable_timeout(
+				pgdat->kcompactd_wait,
+				kcompactd_work_requested(pgdat),
+				msecs_to_jiffies(proactive_delay_ms));
+			if (kthread_should_stop())
+				break;
+			if (ret < 0)
+				continue;
+			if (!ret && !kcompactd_work_requested(pgdat)) {
+				/*
+				 * Proactive compaction is optional background
+				 * maintenance: keep it outside psi_memstall so
+				 * it never inflates PSI_MEM or trips lmkd.
+				 */
+				if (proactive_compact_node(pgdat,
+							   &proactive_active))
+					proactive_delay_ms =
+						COMPACT_PROACTIVE_BASE_MS;
+				else
+					proactive_delay_ms = min(
+						proactive_delay_ms * 2U,
+						COMPACT_PROACTIVE_MAX_MS);
+				continue;
+			}
+		} else {
+			proactive_active = false;
+			proactive_delay_ms = COMPACT_PROACTIVE_BASE_MS;
+			wait_event_freezable(pgdat->kcompactd_wait,
+				kcompactd_work_requested(pgdat) ||
+				READ_ONCE(sysctl_compaction_proactiveness) > 0);
+			if (kthread_should_stop())
+				break;
+			if (!kcompactd_work_requested(pgdat))
+				continue;
+		}
+
+		proactive_delay_ms = COMPACT_PROACTIVE_BASE_MS;
 		psi_memstall_enter(&pflags);
 		kcompactd_do_work(pgdat);
 		psi_memstall_leave(&pflags);
