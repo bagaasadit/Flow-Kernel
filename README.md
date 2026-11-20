@@ -102,6 +102,7 @@ cd Flow-Kernel
 
 ## Credits & License
 
+* Upstream kernel lineage: **Sixfaced** ([`NothingNormal`](https://github.com/NothingNormal) / `rkmandilwar-rgb`) & **BlackHole** (`kim_chi_96` / `arshad-jamil33`) — full git commit history preserved
 * Linux Kernel contributors & Qualcomm CAF / LineageOS `msm-4.14` (`atoll` / `miatoll`) base
 * [Baka-SU / BakaSU](https://github.com/Baka-SU/BakaSU) & SUSFS contributors
 * Neutron Toolchains, osm0sis (AnyKernel3), and upstream MGLRU / BBRv3 / BLK_WBT authors
