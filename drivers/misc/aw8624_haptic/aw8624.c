@@ -70,6 +70,16 @@
  * shipped device tree keeps every predefined effect at full gain.
  */
 #define AW8624_GAIN_FULL 0x80
+/*
+ * Perceptual tier gains (capped below 0x80 so strong effects never overdrive
+ * the LRA and battery-voltage compensation has clean non-clipping headroom):
+ *   LIGHT  (0x3fff) -> 0x44 (53%)
+ *   MEDIUM (0x5fff) -> 0x6C (84%, +12.5% firmer Back Gesture & UI CLICK/TICK)
+ *   STRONG (0x7fff) -> 0x74 (91%, -9.4% softer ceiling eliminating harshness)
+ */
+#define AW8624_GAIN_LIGHT 0x44
+#define AW8624_GAIN_MEDIUM 0x6C
+#define AW8624_GAIN_STRONG 0x74
 #define AW8624_VMAX_REF_MV 3600
 
 #define OSC_CALIBRATION_T_LENGTH 5100000
@@ -1186,17 +1196,17 @@ out:
 
 static int aw8624_haptic_ram_vbat_comp(struct aw8624 *aw8624, bool flag)
 {
-	int temp_gain = 0;
+	unsigned long now = jiffies;
 
-	if (flag && aw8624->ram_vbat_comp == AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE) {
-		aw8624_haptic_get_vbat(aw8624);
-		temp_gain = aw8624->gain * AW8624_VBAT_REFER / aw8624->vbat;
+	if (!flag ||
+	    aw8624->ram_vbat_comp != AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE)
+		return 0;
 
-		if (temp_gain > (128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN)) {
-			temp_gain = 128 * AW8624_VBAT_REFER / AW8624_VBAT_MIN;
-			pr_debug("%s gain limit=%d\n", __func__, temp_gain);
-		}
-		aw8624_haptic_set_gain(aw8624, temp_gain);
+	if (!aw8624->vbat ||
+	    time_after_eq(now, aw8624->vbat_updated_at +
+			       msecs_to_jiffies(AW8624_VBAT_CACHE_MS))) {
+		if (aw8624_haptic_get_vbat(aw8624) == 0 && aw8624->vbat)
+			aw8624->vbat_updated_at = now;
 	}
 
 	return 0;
@@ -1299,13 +1309,44 @@ static int aw8624_haptic_rtp_init(struct aw8624 *aw8624)
 	return ret;
 }
 
+static u8 aw8624_haptic_apply_vbat_comp(const struct aw8624 *aw8624, u8 gain)
+{
+	u32 comp_gain;
+
+	if (!gain ||
+	    aw8624->ram_vbat_comp != AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE ||
+	    aw8624->vbat < AW8624_VBAT_MIN ||
+	    aw8624->vbat > AW8624_VBAT_MAX)
+		return gain;
+
+	comp_gain = DIV_ROUND_CLOSEST((u32)gain * AW8624_VBAT_REFER,
+				      aw8624->vbat);
+	return min_t(u32, comp_gain, AW8624_GAIN_FULL);
+}
+
 static int16_t aw8624_haptic_effect_strength(struct aw8624 *aw8624,
 					      u16 magnitude)
 {
-	/* ponytail: cap at the software reference; tune with phone measurements. */
-	aw8624->level = DIV_ROUND_CLOSEST(
-		(u32)min_t(u16, magnitude, AW8624_STRONG_MAGNITUDE) *
-		AW8624_GAIN_FULL, AW8624_STRONG_MAGNITUDE);
+	u16 clamped;
+
+	if (magnitude == 0) {
+		aw8624->level = 0;
+	} else if (magnitude <= AW8624_LIGHT_MAGNITUDE) {
+		aw8624->level = DIV_ROUND_CLOSEST(
+			(u32)magnitude * AW8624_GAIN_LIGHT,
+			AW8624_LIGHT_MAGNITUDE);
+	} else if (magnitude <= AW8624_MEDIUM_MAGNITUDE) {
+		aw8624->level = AW8624_GAIN_LIGHT + DIV_ROUND_CLOSEST(
+			(u32)(magnitude - AW8624_LIGHT_MAGNITUDE) *
+			(AW8624_GAIN_MEDIUM - AW8624_GAIN_LIGHT),
+			AW8624_MEDIUM_MAGNITUDE - AW8624_LIGHT_MAGNITUDE);
+	} else {
+		clamped = min_t(u16, magnitude, AW8624_STRONG_MAGNITUDE);
+		aw8624->level = AW8624_GAIN_MEDIUM + DIV_ROUND_CLOSEST(
+			(u32)(clamped - AW8624_MEDIUM_MAGNITUDE) *
+			(AW8624_GAIN_STRONG - AW8624_GAIN_MEDIUM),
+			AW8624_STRONG_MAGNITUDE - AW8624_MEDIUM_MAGNITUDE);
+	}
 	return 0;
 }
 
@@ -1401,6 +1442,7 @@ static void aw8624_haptic_play_ram(struct aw8624 *aw8624, int effect_id,
 					  AW8624_GAIN_FULL));
 	/* Prebaked RAM effects encode strength in magnitude, never FF_GAIN. */
 	WRITE_ONCE(aw8624->ff_gain, 0xffff);
+	aw8624->level = aw8624_haptic_apply_vbat_comp(aw8624, aw8624->level);
 	aw8624_haptic_set_gain(aw8624, aw8624->level);
 	aw8624_haptic_start(aw8624);
 }
@@ -1427,6 +1469,8 @@ static int aw8624_haptic_play_seq(struct aw8624 *aw8624, unsigned char flag,
 				DIV_ROUND_CLOSEST((u32)aw8624->level *
 						  aw8624->predefined[seq].level,
 						  AW8624_GAIN_FULL));
+		aw8624->level = aw8624_haptic_apply_vbat_comp(aw8624,
+								aw8624->level);
 		aw8624_haptic_set_gain(aw8624, aw8624->level);
 		aw8624_haptic_set_repeat_wav_seq(aw8624, seq + 1);
 		aw8624_haptic_play_repeat_seq(aw8624, true);
@@ -2420,7 +2464,9 @@ static int aw8624_haptic_chip_init(struct aw8624 *aw8624)
 	/* vbat compensation */
 	aw8624_haptic_cont_vbat_mode(aw8624,
 				     AW8624_HAPTIC_CONT_VBAT_HW_COMP_MODE);
-	//aw8624->ram_vbat_comp = AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE;
+	aw8624->ram_vbat_comp = AW8624_HAPTIC_RAM_VBAT_COMP_ENABLE;
+	if (aw8624_haptic_get_vbat(aw8624) == 0 && aw8624->vbat)
+		aw8624->vbat_updated_at = jiffies;
 	mutex_unlock(&aw8624->lock);
 
 	/* f0 calibration */
@@ -2588,7 +2634,7 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 		bool timed = false;
 
 		if (activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
-			aw8624_haptic_ram_vbat_comp(aw8624, false);
+			aw8624_haptic_ram_vbat_comp(aw8624, true);
 			aw8624_haptic_play_seq(aw8624, true, activate_mode,
 					       effect_id, magnitude);
 		} else if (activate_mode ==

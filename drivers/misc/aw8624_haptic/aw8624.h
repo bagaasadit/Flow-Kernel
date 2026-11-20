@@ -50,6 +50,7 @@
 #define AW8624_VBAT_REFER                   4200
 #define AW8624_VBAT_MIN                     3000
 #define AW8624_VBAT_MAX                     4500
+#define AW8624_VBAT_CACHE_MS                5000
 /* VBAT conversion settles in a few milliseconds; poll it with a delay. */
 #define AW8624_VBAT_POLL_TRIES              100
 #define ENABLE_PIN_CONTROL
@@ -400,6 +401,7 @@ struct aw8624 {
 
 	unsigned char ram_vbat_comp;
 	unsigned int vbat;
+	unsigned long vbat_updated_at;
 	unsigned int lra;
 
 	struct trig trig[AW8624_TRIG_NUM];
