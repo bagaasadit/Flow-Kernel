@@ -70,6 +70,7 @@
 #include <linux/nmi.h>
 #include <linux/khugepaged.h>
 #include <linux/psi.h>
+#include <linux/wait.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -3346,6 +3347,26 @@ try_this_zone:
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {
 			prep_new_page(page, order, gfp_mask, alloc_flags);
+
+			/*
+			 * Early kswapd wakeup cushion: wake sleeping kswapd
+			 * once free pages dip below the midpoint between
+			 * WMARK_LOW (~46 MB) and WMARK_HIGH (~102 MB) —
+			 * ~74 MB on 6 GB miatoll. Lets kswapd start reclaiming
+			 * Inactive(file) before allocation bursts breach
+			 * WMARK_LOW and trigger premature lmkd kills, while
+			 * keeping /proc/zoneinfo WMARK_LOW unchanged.
+			 */
+			if (unlikely((alloc_flags & ALLOC_WMARK_MASK) == ALLOC_WMARK_LOW &&
+				     (gfp_mask & __GFP_KSWAPD_RECLAIM) &&
+				     waitqueue_active(&zone->zone_pgdat->kswapd_wait))) {
+				unsigned long low = low_wmark_pages(zone);
+				unsigned long high = high_wmark_pages(zone);
+				unsigned long early_mark = low + ((high - low) >> 1);
+
+				if (zone_page_state(zone, NR_FREE_PAGES) < early_mark)
+					wakeup_kswapd(zone, order, ac_classzone_idx(ac));
+			}
 
 			/*
 			 * If this is a high-order atomic allocation then check

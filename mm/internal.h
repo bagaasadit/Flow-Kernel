@@ -203,6 +203,9 @@ struct compact_control {
 	bool whole_zone;		/* Whole zone should/has been scanned */
 	bool contended;			/* Signal lock or sched contention */
 	bool finishing_block;		/* Finishing current pageblock */
+	unsigned long proactive_max_scan; /* Scan page budget for proactive pass */
+	unsigned int proactive_target;    /* Target zone fragmentation score */
+	bool proactive;                   /* Background proactive compaction pass */
 };
 
 unsigned long

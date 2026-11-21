@@ -1310,6 +1310,14 @@ static isolate_migrate_t isolate_migratepages(struct zone *zone,
 	return cc->nr_migratepages ? ISOLATE_SUCCESS : ISOLATE_NONE;
 }
 
+#define PROACTIVE_COMPACT_ORDER		4
+#define COMPACT_PROACTIVE_BASE_MS	2000U
+#define COMPACT_PROACTIVE_MAX_MS	32000U
+#define PROACTIVE_MAX_MIGRATE_SCAN	4096UL
+#define PROACTIVE_MAX_FREE_SCAN		16384UL
+
+static unsigned int fragmentation_score_zone(struct zone *zone);
+
 /*
  * order == -1 is expected when compacting via
  * /proc/sys/vm/compact_memory
@@ -1346,6 +1354,20 @@ static enum compact_result __compact_finished(struct zone *zone,
 			return COMPACT_COMPLETE;
 		else
 			return COMPACT_PARTIAL_SKIPPED;
+	}
+
+	if (cc->proactive) {
+		if (cc->total_migrate_scanned >= cc->proactive_max_scan ||
+		    cc->total_free_scanned >= PROACTIVE_MAX_FREE_SCAN)
+			return COMPACT_COMPLETE;
+		if (!zone_watermark_ok(zone, 0,
+				       low_wmark_pages(zone) +
+				       compact_gap(PROACTIVE_COMPACT_ORDER),
+				       cc->classzone_idx, 0))
+			return COMPACT_CONTENDED;
+		if (fragmentation_score_zone(zone) <= cc->proactive_target)
+			return COMPACT_SUCCESS;
+		return COMPACT_CONTINUE;
 	}
 
 	if (is_via_compact_memory(cc->order))
@@ -1549,6 +1571,7 @@ static enum compact_result compact_zone(struct zone *zone, struct compact_contro
 	unsigned long start_pfn = zone->zone_start_pfn;
 	unsigned long end_pfn = zone_end_pfn(zone);
 	const bool sync = cc->mode != MIGRATE_ASYNC;
+	unsigned long last_drain_scanned = 0;
 
 	/*
 	 * These counters track activities during zone compaction.  Initialize
@@ -1685,11 +1708,27 @@ check_drain:
 				/* No more flushing until we migrate again */
 				cc->last_migrated_pfn = 0;
 			}
+		} else if (cc->proactive &&
+			   cc->total_migrate_scanned - last_drain_scanned >= 64UL) {
+			int cpu = get_cpu();
+
+			lru_add_drain_cpu(cpu);
+			drain_local_pages(zone);
+			put_cpu();
+			last_drain_scanned = cc->total_migrate_scanned;
 		}
 
 	}
 
 out:
+	if (cc->proactive && cc->total_migrate_scanned > last_drain_scanned) {
+		int cpu = get_cpu();
+
+		lru_add_drain_cpu(cpu);
+		drain_local_pages(zone);
+		put_cpu();
+	}
+
 	/*
 	 * Release free pages and update where the free scanner should restart,
 	 * so we don't leave any returned pages behind in the next attempt.
@@ -1917,15 +1956,11 @@ void compaction_unregister_node(struct node *node)
 #endif /* CONFIG_SYSFS && CONFIG_NUMA */
 
 /*
- * Gentle order-4 (64 KiB) proactive compaction for mobile multitasking:
- * prevents Buddy >= order-4 exhaustion (direct compact_stall freezes)
- * without THP order-9 overhead, without inflating PSI memstall, and with
- * full freezer compatibility (0 Deep Sleep wakeups).
+ * Gentle budgeted proactive compaction for mobile multitasking:
+ * drives node fragmentation below wmark_low so Buddy order-3/4 blocks stay
+ * available under multitasking bursts without blocking direct reclaim,
+ * inflating PSI memstall, or waking Deep Sleep (0 suspend wakeups).
  */
-#define PROACTIVE_COMPACT_ORDER		4
-#define COMPACT_PROACTIVE_BASE_MS	2000U
-#define COMPACT_PROACTIVE_MAX_MS	32000U
-
 int sysctl_compaction_proactiveness = 20;
 
 static unsigned int fragmentation_score_zone(struct zone *zone)
@@ -1977,7 +2012,7 @@ static unsigned int fragmentation_score_node(pg_data_t *pgdat)
 }
 
 /*
- * Run at most one non-blocking MIGRATE_ASYNC order-4 pass per populated zone
+ * Run at most one non-blocking MIGRATE_ASYNC budgeted pass per populated zone
  * when node external fragmentation exceeds the high threshold (100 - p + 10)
  * until it drops back below the low threshold (100 - p).
  * Returns true only when fragmentation strictly improved and remains above
@@ -2012,12 +2047,17 @@ static bool proactive_compact_node(pg_data_t *pgdat, bool *active)
 
 	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
 		struct zone *zone = &pgdat->node_zones[zoneid];
+		enum compact_result status;
 		struct compact_control cc = {
-			.order = PROACTIVE_COMPACT_ORDER,
+			.order = -1,
 			.classzone_idx = zoneid,
 			.mode = MIGRATE_ASYNC,
 			.ignore_skip_hint = false,
 			.whole_zone = false,
+			.direct_compaction = false,
+			.proactive = true,
+			.proactive_target = wmark_low,
+			.proactive_max_scan = PROACTIVE_MAX_MIGRATE_SCAN,
 			.gfp_mask = GFP_KERNEL,
 		};
 
@@ -2037,12 +2077,11 @@ static bool proactive_compact_node(pg_data_t *pgdat, bool *active)
 		if (fragmentation_score_zone(zone) <= wmark_low)
 			continue;
 
-		if (compaction_suitable(zone, cc.order, 0, zoneid) !=
-							COMPACT_CONTINUE)
-			continue;
-
 		cc.zone = zone;
-		compact_zone(zone, &cc);
+		status = compact_zone(zone, &cc);
+		if (status == COMPACT_PARTIAL_SKIPPED &&
+		    cc.total_migrate_scanned == 0)
+			__reset_isolation_suitable(zone);
 
 		count_compact_events(KCOMPACTD_MIGRATE_SCANNED,
 				     cc.total_migrate_scanned);
