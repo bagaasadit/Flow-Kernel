@@ -4,6 +4,20 @@ All notable releases of **Flow Kernel** (`miatoll` / SM7125) are documented in t
 
 ---
 
+## [v1.2.2] - 2026-11-21
+
+### Memory Management & Multitasking
+- **mm/compaction & mm/internal.h (`proactive_compact_node`):** Fix background proactive compaction stalling on `pageblock_order = 3` non-hugetlb kernels by switching `proactive_compact_node()` to `.order = -1` (`cc.proactive = true`) instead of `.order = 4`, preventing premature exit on a single unmovable order-4 block or `extfrag_threshold` skip; flush per-CPU page lists every 64 scanned pages and on completion so coalesced `order-3/4` blocks reach the buddy allocator, bounded by a strict `4096` migrate / `16384` free scan budget per wakeup while keeping `MIGRATE_ASYNC`, outside `psi_memstall`, and freezable Deep Sleep safety (`0` extra wakeups).
+- **mm/page_alloc (`get_page_from_freelist`):** Add an early `kswapd` wakeup cushion at the midpoint between `WMARK_LOW` (`~46 MB`) and `WMARK_HIGH` (`~102 MB`) — `~74 MB` on 6 GB `miatoll` — letting `kswapd` start reclaiming inactive file cache before allocation bursts breach `WMARK_LOW` and trigger premature `lmkd` low-watermark kills, without altering `/proc/zoneinfo` `WMARK_LOW`.
+
+### Thermal Safety (`quiet-therm-step`)
+- **dts/atoll-thermal:** Preserve daily/gaming curves `<= 48°C` untouched while adding a `49°C` hardware charging pause / USB bypass trip (`chg_trip7`, `hysteresis = 3°C`, `pm6150_charger` `lvl 16`) and a `50°C` Stage 3 emergency ceiling (`Gold 1267.2 MHz`, `Silver 1248.0 MHz`, `GPU 430 MHz`) to protect battery health under sustained extreme workloads.
+
+### Installer UI
+- **AnyKernel3:** Refresh recovery installer layout (`banner` + `anykernel.sh`) to the clean Editorial Flagship style while keeping automatic `boot`/`dtbo` backups and flashing logic intact.
+
+---
+
 ## [v1.2.1] - 2026-11-20
 
 ### Memory Management & Multitasking

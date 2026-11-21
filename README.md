@@ -37,12 +37,12 @@ While the unified `miatoll` build supports all four variants above, all telemetr
 ### Performance, Scheduling & 60Hz Smoothness
 * **QTI EAS (Kryo-465 Model) + 8ms PELT + `HZ=300`:** Balances snappy frame pacing with low power consumption.
 * **Direct `schedutil` Scaling & `SCHEDTUNE_BOOST_HOLD_ALL`:** Removes the 20% lower-OPP hysteresis in `get_next_freq()`, clamps `stale_ns` to a 12 ms floor for 60Hz frame continuity, and retains SchedTune boost across brief UI/RenderThread sleeps.
-* **Recalibrated `quiet-therm-step` Thermals:** 2-stage Gold CPU throttling (`45°C` soft step -> `1996.8 MHz`, `47°C` hard step -> `1708.8 MHz`), independent GPU thermal trips (`46°C`/`48°C` with `2°C` hysteresis), and tropical-friendly modem hysteresis (`2°C`) to prevent premature slowdown below 50% battery while keeping skin/battery temps cool.
+* **Recalibrated `quiet-therm-step` Thermals:** 3-stage Gold CPU throttling (`45°C` -> `1996.8 MHz`, `47°C` -> `1708.8 MHz`, `50°C` emergency -> `1267.2 MHz`), `47°C`/`50°C` Silver scaling (`1516.8 MHz` -> `1248.0 MHz`), independent GPU trips (`46°C`/`48°C`/`50°C` -> `430 MHz`), tropical-friendly modem hysteresis (`2°C`), and a `49°C` hardware charging pause / USB bypass (`lvl 16`) to protect the battery under sustained extreme loads.
 
 ### Memory Management & Multitasking
 * **Fixed Multi-Gen LRU (MGLRU) with Working-Set Protection:** Includes generation aging & memcg migration race fixes, `kswapd` full-to-high-watermark reclaim, and default `lru_gen/min_ttl_ms = 1000` to protect active foreground apps.
-* **Widened & Decoupled Watermarks:** `WMARK_LOW` decoupled from `watermark_scale_factor` (`~46 MB` `LOW`, `~102 MB` `HIGH` on 6 GB devices) with `watermark_scale_factor` floor locked at `100` (`~56 MB` `kswapd` runway) to prevent premature `lmkd` low-watermark kills.
-* **4 GiB `LZ4` zRAM & Order-4 Proactive Compaction:** Pure-kernel `4 GiB` `zram0` floor on 6+ GB variants paired with `vm.swappiness` capped cleanly at `60` (`kvzalloc` Binder buffers, `64 MiB` `reusable` `linux,cma`) and Deep-Sleep-safe gentle order-4 (`64 KiB`) proactive compaction (`vm.compaction_proactiveness = 20`) to eliminate swap thrashing and allocation stalls.
+* **Widened Watermarks & Early `kswapd` Wakeup Cushion:** `WMARK_LOW` decoupled from `watermark_scale_factor` (`~46 MB` `LOW`, `~102 MB` `HIGH` on 6 GB devices) with `watermark_scale_factor` floor locked at `100` and early `kswapd` wakeup at `~74 MB` to prevent premature `lmkd` low-watermark kills.
+* **4 GiB `LZ4` zRAM & Budgeted Proactive Compaction:** Pure-kernel `4 GiB` `zram0` floor on 6+ GB variants paired with `vm.swappiness` capped cleanly at `60` (`kvzalloc` Binder buffers, `64 MiB` `reusable` `linux,cma`) and Deep-Sleep-safe budgeted order-4 target proactive compaction (`vm.compaction_proactiveness = 20`, per-CPU `pcp` drain) to reduce buddy fragmentation and allocation stalls.
 
 ### Storage (`UFS 2.1` + `F2FS`)
 * **Block Writeback Throttling (`CONFIG_BLK_WBT_SQ=y`):** Throttles heavy background buffered writes dynamically whenever interactive read/sync latency spikes, keeping messaging apps and SystemUI responsive under heavy file I/O.
@@ -65,7 +65,7 @@ While the unified `miatoll` build supports all four variants above, all telemetr
 Every release version has its own dedicated release page containing the flashable kernel zip, matching **BakaSU Manager APK**, SHA-256 checksums, and per-version changelog:
 
 * **All Releases (Per-Version):** 👉 **[GitHub Releases](https://github.com/bagaasadit/Flow-Kernel/releases)**
-* **BakaSU Manager APK (`v4.2.0-rc3`):** [BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk](https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.1/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk)  
+* **BakaSU Manager APK (`v4.2.0-rc3`):** [BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk](https://github.com/bagaasadit/Flow-Kernel/releases/download/v1.2.2/BakaSU_v4.2.0-rc3_35252-arm64-v8a-release.apk)  
   SHA-256: `43ccd6ec08844bf656b0800d84567c4f04412203446e6dada9570008f180fe25`
 
 ---

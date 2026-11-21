@@ -4,7 +4,7 @@
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=Flow Kernel v1.2.1 by bagaasadit
+kernel.string=Flow Kernel v1.2.2 by bagaasadit
 do.devicecheck=1
 do.modules=0
 do.systemless=1
@@ -31,36 +31,38 @@ PATCH_VBMETA_FLAG=auto;
 . tools/ak3-core.sh;
 
 ui_print " ";
-ui_print "==================================";
-ui_print "        Flow Kernel v1.2.1        ";
-ui_print "          By bagaasadit           ";
-ui_print "==================================";
+ui_print "  Device     : miatoll (A11 - A17)";
+ui_print "  Kernel     : Linux 4.14.357 (5.15.207)";
+ui_print "  Root       : BakaSU + SUSFS v2.4";
+ui_print "  Maintainer : bagaasadit";
+ui_print "  ─────────────────────────────────";
+ui_print " ";
 
 if mountpoint -q /data; then
-	ui_print " ";
-	ui_print "[+] Backing up boot & DTBO . . .";
-
-	dd if=/dev/block/by-name/boot of=/sdcard/backup_boot.img;
-	dd if=/dev/block/by-name/dtbo of=/sdcard/backup_dtbo.img;
+	dd if=/dev/block/by-name/boot of=/sdcard/backup_boot.img >/dev/null 2>&1;
+	dd if=/dev/block/by-name/dtbo of=/sdcard/backup_dtbo.img >/dev/null 2>&1;
 	if [ $? != 0 ]; then
-		ui_print "[!] Backup failed; proceeding anyway . . .";
+		ui_print "  [!] Backup failed; proceeding...";
 	else
-		ui_print "[+] Done";
+		ui_print "  • Backing up boot & dtbo ....... OK";
 	fi
 fi
 
 ## AnyKernel install
 
-ui_print ">>> Calling split_boot"
-split_boot || abort "split_boot failed"
+split_boot || abort "split_boot failed";
+ui_print "  • Unpacking boot image ......... OK";
 
-ui_print ">>> Calling flash_boot"
-flash_boot || abort "flash_boot failed"
+flash_boot || abort "flash_boot failed";
+ui_print "  • Flashing kernel & dtb ........ OK";
 
-ui_print ">>> Calling flash_dtbo"
-flash_generic dtbo || abort "flash_dtbo failed"
+flash_generic dtbo || abort "flash_dtbo failed";
+ui_print "  • Flashing dtbo ................ OK";
 
-ui_print ">>> Installation finished"
+ui_print " ";
+ui_print "  ─────────────────────────────────";
+ui_print "  Done. Backup saved in /sdcard.";
+ui_print " ";
 
 ## end install
 
