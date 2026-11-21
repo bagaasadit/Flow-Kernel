@@ -1221,6 +1221,12 @@
 				type = "passive";
 			};
 
+			chg_trip7: chg-trip7 {
+				temperature = <49000>;
+				hysteresis = <3000>;
+				type = "passive";
+			};
+
 			skin_modem_trip2: modem-trip2 {
 				temperature = <50000>;
 				hysteresis = <3000>;
@@ -1261,6 +1267,19 @@
 					<&CPU7 THERMAL_NO_LIMIT
 						(THERMAL_MAX_LIMIT-7)>;
 			};
+			skin_cpu6_stage3 {
+				trip = <&skin_modem_trip2>;
+				cooling-device =
+					/* stage 3 (50C emergency): throttle to 1267200KHz */
+					<&CPU6 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu7_stage3 {
+				trip = <&skin_modem_trip2>;
+				cooling-device =
+					<&CPU7 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
 			skin_cpu0 {
 				trip = <&skin_silver_trip>;
 				/* throttle from fmax to 1516800KHz */
@@ -1292,6 +1311,37 @@
 				cooling-device = <&CPU5 THERMAL_NO_LIMIT
 						(THERMAL_MAX_LIMIT-7)>;
 			};
+			skin_cpu0_stage2 {
+				trip = <&skin_modem_trip2>;
+				/* stage 2 (50C emergency): throttle to 1248000KHz */
+				cooling-device = <&CPU0 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu1_stage2 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&CPU1 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu2_stage2 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&CPU2 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu3_stage2 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&CPU3 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu4_stage2 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&CPU4 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
+			skin_cpu5_stage2 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&CPU5 THERMAL_NO_LIMIT
+						(THERMAL_MAX_LIMIT-5)>;
+			};
 			skin_gpu {
 				trip = <&skin_gpu_trip0>;
 				cooling-device = <&msm_gpu (THERMAL_MAX_LIMIT-4)
@@ -1301,6 +1351,11 @@
 				trip = <&skin_gpu_trip1>;
 				cooling-device = <&msm_gpu (THERMAL_MAX_LIMIT-3)
 						(THERMAL_MAX_LIMIT-3)>;
+			};
+			skin_gpu_stage3 {
+				trip = <&skin_modem_trip2>;
+				cooling-device = <&msm_gpu (THERMAL_MAX_LIMIT-2)
+						(THERMAL_MAX_LIMIT-2)>;
 			};
 			skin_modem_proc0 {
 				trip = <&skin_modem_trip0>;
@@ -1353,6 +1408,10 @@
 			chg_bat6 {
 				trip = <&chg_trip6>;
 				cooling-device = <&pm6150_charger 14 14>;
+			};
+			chg_bat7 {
+				trip = <&chg_trip7>;
+				cooling-device = <&pm6150_charger 16 16>;
 			};
 		};
 	};
