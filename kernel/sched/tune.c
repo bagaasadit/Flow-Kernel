@@ -712,7 +712,7 @@ static void write_default_values(struct cgroup_subsys_state *css)
 	static struct st_data st_targets[] = {
 		{ "background",	   0, 0, 0, 0 },
 		{ "camera-daemon", 1, 0, 0, 1 },
-		{ "foreground",	   0, 0, 0, 1 },
+		{ "foreground",	   0, 1, 0, 1 },
 		{ "rt",		   0, 0, 0, 0 },
 		{ "top-app",	   1, 1, 0, 1 },
 	};

@@ -17,6 +17,7 @@
 #include <linux/context_tracking.h>
 #include <linux/rcupdate_wait.h>
 
+#include <linux/binfmts.h>
 #include <linux/blkdev.h>
 #include <linux/kcov.h>
 #include <linux/kprobes.h>
@@ -8342,6 +8343,11 @@ int sched_updown_migrate_handler(struct ctl_table *table, int write,
 	ret = proc_douintvec_capacity(table, write, buffer, lenp, ppos);
 
 	if (ret) {
+		memcpy(data, old_val, table->maxlen);
+		goto free_old_val;
+	}
+
+	if (task_is_booster(current)) {
 		memcpy(data, old_val, table->maxlen);
 		goto free_old_val;
 	}

@@ -1961,7 +1961,7 @@ void compaction_unregister_node(struct node *node)
  * available under multitasking bursts without blocking direct reclaim,
  * inflating PSI memstall, or waking Deep Sleep (0 suspend wakeups).
  */
-int sysctl_compaction_proactiveness = 20;
+int sysctl_compaction_proactiveness = 40;
 
 static unsigned int fragmentation_score_zone(struct zone *zone)
 {
