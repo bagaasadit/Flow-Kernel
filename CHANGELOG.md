@@ -4,6 +4,20 @@ All notable releases of **Flow Kernel** (`miatoll` / SM7125) are documented in t
 
 ---
 
+## [v1.2.3] - 2026-11-22
+
+### Charging & Stability (P0 Fix)
+- **power/supply (`smb5-lib.c`, `smb5-lib.h`):** Rate-limit `sdam_sts_change_irq_handler` (`PULSE_SKIP_IRQ_BIT`) `usb_main_psy` uevent notifications to at most once per `1000 ms` while keeping `chg->irq_status` updated unconditionally, and deduplicate `smblib_icl_change_work` notifications when `settled_ua` has not changed (resetting state cleanly on USB plug/unplug). Eliminates charging IRQ/uevent storms during fast-charge taper without affecting QC/PD negotiation or plug detection.
+
+### Thermal Management (`step_wise` + `quiet-therm-step`)
+- **drivers/thermal/step_wise & dts/atoll-thermal:** Prevent inactive higher thermal trips sharing a cooling device from prematurely arming off lower stages' `cur_state - 1`, and enforce cascading lower bounds across `quiet-therm-step` Gold (`stage 2`: `47°C`, `stage 3`: `50°C`) and Silver (`stage 2`: `50°C`) cooling maps so each stage stays inactive below its trip threshold and steps down cleanly on cooldown.
+
+### UI Smoothness, Scheduling & 6 GB Memory Management
+- **kernel/sched (`fair.c`, `core.c`, `cpufreq_schedutil.c`, `tune.c`, `CONFIG_CPUSET_ASSIST`):** Tune WALT migration thresholds to `60%` up / `52%` down (`init`-protected against `post_boot` overrides), raise Gold `schedutil/down_rate_limit_us` to `30000 us` (keeping Silver at `20000 us`), enable `schedtune.prefer_idle` on `/dev/stune/foreground`, and isolate `background` (`0-2`) and `system-background` (`0-3`) cpusets in kernel.
+- **mm (`compaction.c`, `page_alloc.c`):** Raise `vm.compaction_proactiveness` default to `40`, scale `extra_free_kbytes` `WMARK_LOW` contribution to `60%` (`~35.8 MB` on 6 GB `miatoll`), and set `MIN_WATERMARK_SCALE_FACTOR = 125` (`~70.4 MB` `kswapd` runway) to reduce fragmentation stalls and unnecessary `lmkd` kills.
+
+---
+
 ## [v1.2.2] - 2026-11-21
 
 ### Memory Management & Multitasking

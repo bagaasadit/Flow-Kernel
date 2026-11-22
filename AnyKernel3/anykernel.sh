@@ -4,7 +4,7 @@
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=Flow Kernel v1.2.2 by bagaasadit
+kernel.string=Flow Kernel v1.2.3 by bagaasadit
 do.devicecheck=1
 do.modules=0
 do.systemless=1
