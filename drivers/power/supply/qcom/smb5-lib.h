@@ -688,6 +688,8 @@ struct smb_charger {
 	int			thermal_status;
 	int			main_fcc_max;
 	u32			jeita_soft_thlds[2];
+	ktime_t			sdam_last_notify_time;
+	int			last_icl_settled_ua;
 	u32			jeita_soft_hys_thlds[2];
 	int			jeita_soft_fcc[2];
 	int			jeita_soft_fv[2];

@@ -5708,14 +5708,22 @@ irqreturn_t sdam_sts_change_irq_handler(int irq, void *data)
 {
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
+	ktime_t now = ktime_get_boottime();
+	bool notify = false;
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	mutex_lock(&chg->irq_status_lock);
 	chg->irq_status |= PULSE_SKIP_IRQ_BIT;
+	if (!chg->sdam_last_notify_time ||
+	    ktime_to_ms(ktime_sub(now, chg->sdam_last_notify_time)) >= 1000) {
+		chg->sdam_last_notify_time = now;
+		notify = true;
+	}
 	mutex_unlock(&chg->irq_status_lock);
 
-	power_supply_changed(chg->usb_main_psy);
+	if (notify)
+		power_supply_changed(chg->usb_main_psy);
 	return IRQ_HANDLED;
 }
 
@@ -6332,6 +6340,11 @@ irqreturn_t usb_plugin_irq_handler(int irq, void *data)
 	struct smb_charger *chg = irq_data->parent_data;
 
 	smblib_dbg(chg, PR_INTERRUPT, "pd_hard_reset=%d\n", chg->pd_hard_reset);
+	chg->last_icl_settled_ua = -1;
+	mutex_lock(&chg->irq_status_lock);
+	chg->sdam_last_notify_time = 0;
+	mutex_unlock(&chg->irq_status_lock);
+
 	if (chg->pd_hard_reset)
 		smblib_usb_plugin_hard_reset_locked(chg);
 	else
@@ -8584,7 +8597,10 @@ static void smblib_icl_change_work(struct work_struct *work)
 		return;
 	}
 
-	power_supply_changed(chg->usb_main_psy);
+	if (settled_ua != chg->last_icl_settled_ua) {
+		chg->last_icl_settled_ua = settled_ua;
+		power_supply_changed(chg->usb_main_psy);
+	}
 
 	smblib_dbg(chg, PR_OEM, "icl_settled=%d\n", settled_ua);
 }
@@ -9455,6 +9471,8 @@ int smblib_init(struct smb_charger *chg)
 
 	mutex_init(&chg->smb_lock);
 	mutex_init(&chg->irq_status_lock);
+	chg->sdam_last_notify_time = 0;
+	chg->last_icl_settled_ua = -1;
 	mutex_init(&chg->dpdm_lock);
 	spin_lock_init(&chg->typec_pr_lock);
 	mutex_init(&chg->dcin_aicl_lock);
