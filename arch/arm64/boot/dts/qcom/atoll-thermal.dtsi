@@ -1258,26 +1258,26 @@
 				trip = <&skin_gold_trip1>;
 				cooling-device =
 					/* stage 2: throttle to 1708800KHz */
-					<&CPU6 THERMAL_NO_LIMIT
+					<&CPU6 (THERMAL_MAX_LIMIT-10)
 						(THERMAL_MAX_LIMIT-7)>;
 			};
 			skin_cpu7_stage2 {
 				trip = <&skin_gold_trip1>;
 				cooling-device =
-					<&CPU7 THERMAL_NO_LIMIT
+					<&CPU7 (THERMAL_MAX_LIMIT-10)
 						(THERMAL_MAX_LIMIT-7)>;
 			};
 			skin_cpu6_stage3 {
 				trip = <&skin_modem_trip2>;
 				cooling-device =
 					/* stage 3 (50C emergency): throttle to 1267200KHz */
-					<&CPU6 THERMAL_NO_LIMIT
+					<&CPU6 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu7_stage3 {
 				trip = <&skin_modem_trip2>;
 				cooling-device =
-					<&CPU7 THERMAL_NO_LIMIT
+					<&CPU7 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu0 {
@@ -1314,32 +1314,32 @@
 			skin_cpu0_stage2 {
 				trip = <&skin_modem_trip2>;
 				/* stage 2 (50C emergency): throttle to 1248000KHz */
-				cooling-device = <&CPU0 THERMAL_NO_LIMIT
+				cooling-device = <&CPU0 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu1_stage2 {
 				trip = <&skin_modem_trip2>;
-				cooling-device = <&CPU1 THERMAL_NO_LIMIT
+				cooling-device = <&CPU1 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu2_stage2 {
 				trip = <&skin_modem_trip2>;
-				cooling-device = <&CPU2 THERMAL_NO_LIMIT
+				cooling-device = <&CPU2 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu3_stage2 {
 				trip = <&skin_modem_trip2>;
-				cooling-device = <&CPU3 THERMAL_NO_LIMIT
+				cooling-device = <&CPU3 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu4_stage2 {
 				trip = <&skin_modem_trip2>;
-				cooling-device = <&CPU4 THERMAL_NO_LIMIT
+				cooling-device = <&CPU4 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_cpu5_stage2 {
 				trip = <&skin_modem_trip2>;
-				cooling-device = <&CPU5 THERMAL_NO_LIMIT
+				cooling-device = <&CPU5 (THERMAL_MAX_LIMIT-7)
 						(THERMAL_MAX_LIMIT-5)>;
 			};
 			skin_gpu {

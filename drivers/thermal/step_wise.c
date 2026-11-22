@@ -78,6 +78,15 @@ static unsigned long get_target_state(struct thermal_instance *instance,
 		return next_target;
 	}
 
+	/*
+	 * Keep an inactive, non-throttling trip instance inactive instead of
+	 * adopting (cur_state - 1) from another active trip sharing the same
+	 * cooling device; otherwise higher trips get prematurely armed and
+	 * trigger at their hysteresis threshold instead of trip_temp.
+	 */
+	if (!throttle && next_target == THERMAL_NO_TARGET)
+		return THERMAL_NO_TARGET;
+
 	switch (trend) {
 	case THERMAL_TREND_RAISING:
 		if (throttle) {
