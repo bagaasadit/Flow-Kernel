@@ -154,30 +154,19 @@ fi
 rm -rf AnyKernel
 
 # ---------------------------------------------------------------------------
-# BakaSU driver. drivers/kernelsu is a symlink to ../KernelSU/kernel, so the
-# driver source is not vendored in this tree. It is cloned here because
-# BakaSU's Kbuild derives KSU_VERSION from `git rev-list --count HEAD` and
-# errors out when ../.git is missing, so a plain copy or a shallow clone will
-# not do: --filter=blob:none keeps the full commit history without the blobs.
+# SukiSU-Nova driver. drivers/kernelsu is a symlink to ../KernelSU/kernel, so
+# the driver source is not vendored in this tree. scripts/ksu-nova-flow-setup.sh
+# fetches it at a pinned commit, applies the 4.14 driver ports and adapts the
+# tree's existing SUSFS hooks to it. It is idempotent, so running it here after
+# CI already ran it only re-verifies.
 # ---------------------------------------------------------------------------
-KSU_REPO="${KSU_REPO:-https://github.com/Baka-SU/BakaSU}"
-KSU_REF="${KSU_REF:-548d1dda060ca198823d8808804d01f5209ef4a9}"
-if [ ! -e KernelSU/.git ]; then
-    rm -rf KernelSU
-    git clone --filter=blob:none "$KSU_REPO" KernelSU || { echo " Failed to clone $KSU_REPO"; exit 1; }
-fi
-# CI checks out its own BakaSU pin before calling this script. Re-align to
-# $KSU_REF here so both entry points compile the same driver; otherwise the
-# build silently uses the workflow pin and disagrees with the local default.
-if [ "$(git -C KernelSU rev-parse HEAD)" != "$(git -C KernelSU rev-parse "$KSU_REF^{commit}" 2>/dev/null)" ]; then
-    git -C KernelSU checkout -q "$KSU_REF" || { echo " Failed to check out BakaSU $KSU_REF (shallow clone? rm -rf KernelSU)"; exit 1; }
-fi
+bash scripts/ksu-nova-flow-setup.sh || { echo " Failed to set up SukiSU-Nova"; exit 1; }
 if [ ! -e drivers/kernelsu/Kbuild ]; then
     echo "ERROR: drivers/kernelsu is not a usable symlink to ../KernelSU/kernel." >&2
     echo "       Check this tree out on a filesystem with symlink support." >&2
     exit 1
 fi
-echo "BakaSU: $(git -C KernelSU log -1 --format='%h %s') ($(git -C KernelSU rev-list --count HEAD) commits)"
+echo "SukiSU-Nova: $(git -C KernelSU log -1 --format='%h %s')"
 
 make O=out ARCH=arm64 vendor/xiaomi/miatoll_defconfig || { echo " Failed to generate .config"; exit 1; }
 make O=out ARCH=arm64 headers_install INSTALL_HDR_PATH="$(pwd)/out/usr" || { echo " Failed to install headers"; exit 1; }
@@ -244,7 +233,7 @@ cp "$kimage" AnyKernel/Image
 cp "$dtb_src" AnyKernel/dtb
 cp out/arch/arm64/boot/dtbo.img AnyKernel/dtbo.img
 cd AnyKernel
-zip -r9 "Flow-Kernel-${FLOW_VER}-BakaSU-miatoll-${TANGGAL}.zip" *
+zip -r9 "Flow-Kernel-${FLOW_VER}-Nova-miatoll-${TANGGAL}.zip" *
 cd ../
 }
 compile
