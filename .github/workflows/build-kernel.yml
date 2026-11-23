@@ -199,16 +199,12 @@ jobs:
             ccache-${{ runner.os }}-${{ env.NEUTRON_TAG }}-${{ hashFiles('arch/arm64/configs/vendor/xiaomi/miatoll_defconfig', 'build.sh', 'Makefile') }}-
             ccache-${{ runner.os }}-${{ env.NEUTRON_TAG }}-
 
-      - name: Set up BakaSU
+      - name: Set up SukiSU-Nova
         run: |
           set -euo pipefail
-          # drivers/kernelsu is a symlink to ../KernelSU/kernel, so the driver
-          # source is not vendored. Full history (blobless) is required:
-          # BakaSU computes KSU_VERSION as 30000 + commit count + 700 and its
-          # Kbuild errors out when KernelSU/.git is missing.
-          git clone --filter=blob:none https://github.com/Baka-SU/BakaSU KernelSU
-          git -C KernelSU checkout -q 548d1dda
-          echo "BakaSU: $(git -C KernelSU log -1 --format='%h %s') ($(git -C KernelSU rev-list --count HEAD) commits)"
+          # Fetches SukiSU-Nova at the pinned commit into KernelSU/, applies the
+          # 4.14 driver ports and adapts the tree's SUSFS hooks to it.
+          bash scripts/ksu-nova-flow-setup.sh
           echo "KSU_COMMIT=$(git -C KernelSU log -1 --format=%h)" >> "$GITHUB_ENV"
           test -e drivers/kernelsu/Kbuild || {
             echo "::error::drivers/kernelsu is not a usable symlink to ../KernelSU/kernel"
@@ -277,18 +273,6 @@ jobs:
               echo "  ok   $sym off"
             fi
           done
-
-          # The manager's SuperUser/Module tabs depend on the UAPI version it
-          # speaks; BakaSU shipping this pin advertises 6.
-          if grep -qE "^static const __u32 KERNEL_SU_UAPI_VERSION = 6;" \
-               KernelSU/uapi/supercall.h 2>/dev/null || \
-             grep -qE "^static const __u32 KERNEL_SU_UAPI_VERSION = 6;" \
-               KernelSU/kernel/include/uapi/supercall.h 2>/dev/null; then
-            echo "  ok   BakaSU advertises uapi 6"
-          else
-            echo "::error::BakaSU no longer advertises KERNEL_SU_UAPI_VERSION 6"
-            fail=1
-          fi
 
           # Scheduler and container features added on top of the SUSFS set.
           # These are the ones userspace advertises: uclamp/schedtune for
@@ -432,7 +416,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Flow-Kernel-${{ env.FLOW_VER }}-BakaSU-miatoll
+          name: Flow-Kernel-${{ env.FLOW_VER }}-Nova-miatoll
           path: AnyKernel/Flow-Kernel-*.zip
           compression-level: 0
           if-no-files-found: error
