@@ -1,0 +1,87 @@
+name: Recon 3 (Nova swap)
+
+# Read-only. Prints the exact code the Nova setup needs to fit around:
+# avc.c, the hook sites, and Flow's own SUSFS avc-spoofing code.
+# Nothing is modified and nothing is pushed.
+#
+# Runs when this file is pushed to the branch "nova-swap",
+# or manually from the Actions tab if the file is also on main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [nova-swap]
+    paths: ['.github/workflows/recon3-nova.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Flow tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Print avc.c and SUSFS avc code
+        shell: bash
+        run: |
+          set +e
+          echo "::group::avc.c every KSU/SUSFS/spoof line"
+          grep -nE 'ksu|KSU|susfs|SUSFS|spoof' security/selinux/avc.c
+          echo "::endgroup::"
+
+          echo "::group::avc.c avc_dump_query() whole function"
+          awk '/avc_dump_query\(/{p=1} p{print NR": "$0} p&&/^}/{exit}' security/selinux/avc.c
+          echo "::endgroup::"
+
+          echo "::group::avc.c first 60 lines (includes)"
+          sed -n 1,60p security/selinux/avc.c
+          echo "::endgroup::"
+
+          echo "::group::susfs avc references (headers + fs/susfs.c)"
+          grep -nE 'avc' include/linux/susfs.h include/linux/susfs_def.h fs/susfs.c
+          echo "::endgroup::"
+
+          echo "::group::who defines/uses susfs_is_avc_log_spoofing_enabled"
+          git grep -nI 'susfs_is_avc_log_spoofing_enabled' -- . ':!drivers/kernelsu'
+          echo "::endgroup::"
+
+      - name: Print hook sites
+        shell: bash
+        run: |
+          set +e
+          for f in fs/exec.c drivers/input/input.c kernel/reboot.c kernel/sys.c \
+                   fs/open.c fs/stat.c fs/read_write.c security/selinux/hooks.c; do
+            echo "::group::$f hook context"
+            git grep -nI -B6 -A10 -E 'ksu_|CONFIG_KSU' -- "$f" | head -n 260
+            echo "::endgroup::"
+          done
+
+      - name: Print KSU wiring and config
+        shell: bash
+        run: |
+          set +e
+          echo "::group::drivers wiring"
+          grep -nE 'kernelsu|ksu' drivers/Makefile drivers/Kconfig
+          ls -la drivers/kernelsu | head -40
+          echo "::endgroup::"
+
+          echo "::group::drivers/kernelsu/Kconfig"
+          cat drivers/kernelsu/Kconfig
+          echo "::endgroup::"
+
+          echo "::group::defconfig KSU/SUSFS/NOMOUNT lines"
+          grep -nE 'KSU|SUSFS|NOMOUNT' arch/arm64/configs/vendor/xiaomi/miatoll_defconfig
+          echo "::endgroup::"
+
+          echo "::group::build.sh KSU fetch lines"
+          grep -nE 'BakaSU|baka|git clone|kernelsu|COMMIT|PIN' build.sh
+          echo "::endgroup::"
+
+          echo "::group::fs/Makefile + security/selinux/Makefile"
+          grep -nE 'susfs|nomount|ksu' fs/Makefile security/selinux/Makefile
+          echo "::endgroup::"
