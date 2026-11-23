@@ -161,7 +161,7 @@ rm -rf AnyKernel
 # CI already ran it only re-verifies.
 # ---------------------------------------------------------------------------
 bash scripts/ksu-nova-flow-setup.sh || { echo " Failed to set up SukiSU-Nova"; exit 1; }
-if [ ! -e drivers/kernelsu/Makefile ]; then
+if [ ! -e drivers/kernelsu/Kbuild ]; then
     echo "ERROR: drivers/kernelsu is not a usable symlink to ../KernelSU/kernel." >&2
     echo "       Check this tree out on a filesystem with symlink support." >&2
     exit 1
@@ -170,6 +170,10 @@ echo "SukiSU-Nova: $(git -C KernelSU log -1 --format='%h %s')"
 
 make O=out ARCH=arm64 vendor/xiaomi/miatoll_defconfig || { echo " Failed to generate .config"; exit 1; }
 make O=out ARCH=arm64 headers_install INSTALL_HDR_PATH="$(pwd)/out/usr" || { echo " Failed to install headers"; exit 1; }
+# SukiSU-Nova's preinit "runner" (nolibc) is built via a rule that may expect
+# UAPI headers relative to the source tree rather than out/ (O=out). Mirror
+# them into the source tree too as a harmless fallback.
+make ARCH=arm64 headers_install INSTALL_HDR_PATH="$(pwd)/usr" || { echo " Failed to install in-tree headers"; exit 1; }
 # keep the caller PATH: only the toolchain dir needs to win, and hardcoding
 # /usr/bin:/bin ahead of $PATH silently hid a caller-supplied tool dir
 # (found during a stubbed dry run of this script)
@@ -196,6 +200,49 @@ make -j$(( $(nproc --all) + 2 )) O=out \
                       READELF="${TOOLCHAIN_BIN}/llvm-readelf" \
                       STRIP="${TOOLCHAIN_BIN}/llvm-strip" \
                       OBJSIZE="${TOOLCHAIN_BIN}/llvm-size" \
+                      CONFIG_NO_ERROR_ON_MISMATCH=y
+rc=$?
+if command -v ccache >/dev/null 2>&1; then ccache -s 2>/dev/null | head -15; fi
+if [ $rc -ne 0 ]; then
+echo " Kernel build failed (make exit code $rc)"
+exit $rc
+fi
+}
+function zupload()
+{
+kimage=out/arch/arm64/boot/Image
+if [ ! -f "$kimage" ]; then
+echo " Failed To Compile Kernel (missing $kimage)"
+exit 1
+fi
+if [ ! -f out/arch/arm64/boot/dtbo.img ]; then
+echo " Failed To Compile dtbo.img"
+exit 1
+fi
+if [ -f out/arch/arm64/boot/dts/qcom/cust-atoll-ab.dtb ]; then
+dtb_src=out/arch/arm64/boot/dts/qcom/cust-atoll-ab.dtb
+elif [ -f out/arch/arm64/boot/dtb.img ]; then
+dtb_src=out/arch/arm64/boot/dtb.img
+else
+echo " Failed To Compile DTB (missing cust-atoll-ab.dtb / dtb.img)"
+exit 1
+fi
+
+echo -e " Kernel Compile Successful"
+FLOW_VER=$(sed -n 's/^CONFIG_LOCALVERSION="-Flow-\([^"]*\)"/\1/p' arch/arm64/configs/vendor/xiaomi/miatoll_defconfig)
+[ -n "$FLOW_VER" ] || FLOW_VER="v1.2.0"
+rm -rf AnyKernel
+cp -a AnyKernel3 AnyKernel
+cp "$kimage" AnyKernel/Image
+cp "$dtb_src" AnyKernel/dtb
+cp out/arch/arm64/boot/dtbo.img AnyKernel/dtbo.img
+cd AnyKernel
+zip -r9 "Flow-Kernel-${FLOW_VER}-Nova-miatoll-${TANGGAL}.zip" *
+cd ../
+}
+compile
+zupload
+BJSIZE="${TOOLCHAIN_BIN}/llvm-size" \
                       CONFIG_NO_ERROR_ON_MISMATCH=y
 rc=$?
 if command -v ccache >/dev/null 2>&1; then ccache -s 2>/dev/null | head -15; fi
