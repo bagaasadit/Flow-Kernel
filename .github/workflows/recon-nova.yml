@@ -1,0 +1,174 @@
+name: Recon (Nova swap)
+
+# Read-only reconnaissance. Collects everything needed to swap BakaSU for
+# SukiSU Nova in this tree, then dry-runs the Nova setup on a scratch COPY.
+# Nothing in the repository is modified and nothing is pushed.
+#
+# Runs automatically when this file is pushed to the branch "nova-swap",
+# or manually from the Actions tab once the file exists on the default branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      samms_ref:
+        description: Branch of Nihal-live/Samms_Kernel_miatoll that has scripts/ksu-nova-setup.sh
+        default: arena/6930beb9-samms-kernel-miatoll
+  push:
+    branches: [nova-swap]
+    paths: ['.github/workflows/recon-nova.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Flow tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout Samms (Nova setup script)
+        id: samms
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: Nihal-live/Samms_Kernel_miatoll
+          ref: ${{ inputs.samms_ref || 'arena/6930beb9-samms-kernel-miatoll' }}
+          path: samms
+          fetch-depth: 1
+
+      - name: Collect tree information
+        shell: bash
+        run: |
+          set +e
+          mkdir -p recon
+          R="$GITHUB_WORKSPACE/recon"
+
+          show() {  # print a collected file into the log, capped
+            echo "::group::$1"
+            head -c 150000 "$R/$1"
+            echo
+            echo "::endgroup::"
+          }
+
+          {
+            echo "date: $(date -u)"
+            echo "branch: $(git rev-parse --abbrev-ref HEAD)"
+            echo "commit: $(git log -1 --format='%H %s')"
+            echo "kernel: $(make -s kernelversion 2>&1)"
+            echo "samms checkout outcome: ${{ steps.samms.outcome }}"
+            echo "--- top level"; ls -la
+            echo "--- scripts/"; ls -la scripts 2>&1 | head -50
+            echo "--- root shell scripts"; ls -1 ./*.sh 2>&1
+            echo "--- workflows"; ls -la .github/workflows 2>&1
+            echo "--- tracked files: $(git ls-files | wc -l)"
+          } > "$R/00-env.txt" 2>&1
+          show 00-env.txt
+
+          { for f in build.sh; do echo "=== $f"; cat "$f" 2>&1; done; } > "$R/01-build-sh.txt"
+          show 01-build-sh.txt
+
+          {
+            echo "--- lines about KSU fetch / pin in build.sh"
+            grep -nE 'BakaSU|baka|git clone|kernelsu|KernelSU|susfs|SUSFS|nomount|COMMIT|PIN' build.sh 2>&1
+          } > "$R/02-build-sh-ksu.txt"
+          show 02-build-sh-ksu.txt
+
+          { for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+              [ -f "$f" ] && { echo "=== $f"; cat "$f"; }
+            done; } > "$R/03-workflows.txt" 2>&1
+          show 03-workflows.txt
+
+          { echo "--- KSU/SUSFS/NoMount related tracked files"
+            git ls-files | grep -iE 'susfs|nomount|kernelsu|ksu|baka'
+            echo "--- drivers/kernelsu present?"; ls -la drivers/kernelsu 2>&1 | head
+            echo "--- drivers/Makefile / Kconfig wiring"
+            grep -nE 'kernelsu|ksu' drivers/Makefile drivers/Kconfig 2>&1
+            echo "--- .gitmodules"; cat .gitmodules 2>&1
+          } > "$R/04-ksu-files.txt"
+          show 04-ksu-files.txt
+
+          { echo "--- per-file match counts (outside drivers/kernelsu and configs)"
+            git grep -cIE 'CONFIG_KSU|CONFIG_NOMOUNT|ksu_|susfs|nomount' \
+              -- . ':!drivers/kernelsu' ':!arch/arm64/configs' | sort -t: -k2 -nr
+            echo; echo "--- every match (first 700)"
+            git grep -nIE 'CONFIG_KSU|CONFIG_NOMOUNT|ksu_|susfs|nomount' \
+              -- . ':!drivers/kernelsu' ':!arch/arm64/configs' | head -n 700
+          } > "$R/05-ksu-refs.txt" 2>&1
+          show 05-ksu-refs.txt
+
+          { for f in fs/exec.c fs/open.c fs/stat.c fs/read_write.c fs/namespace.c \
+                     kernel/sys.c kernel/reboot.c drivers/input/input.c; do
+              echo; echo "=================== $f"
+              git grep -nI -B4 -A8 -E 'ksu_|susfs|CONFIG_KSU' -- "$f" | head -n 160
+            done; } > "$R/06-hook-context.txt" 2>&1
+          show 06-hook-context.txt
+
+          { for d in $(git ls-files | grep -E 'miatoll.*defconfig'); do
+              echo "=================== $d"
+              grep -nE 'KSU|SUSFS|NOMOUNT|LOCALVERSION|KPROBES|KALLSYMS|FAKE_UNAME|OVERLAY_FS|MODULE_SIG|LTO|POLLY|EROFS|CONFIG_KEYS' "$d"
+            done
+            echo; echo "=================== drivers/kernelsu/Kconfig"
+            cat drivers/kernelsu/Kconfig 2>&1 | head -n 250
+          } > "$R/07-defconfig-kconfig.txt" 2>&1
+          show 07-defconfig-kconfig.txt
+
+          { echo "--- samms scripts"; ls -la samms/scripts 2>&1
+            echo; echo "=================== samms/scripts/ksu-nova-setup.sh"
+            cat samms/scripts/ksu-nova-setup.sh 2>&1
+            echo; echo "=================== samms/.github/workflows (sukisu)"
+            for f in samms/.github/workflows/*sukisu*.yml; do [ -f "$f" ] && { echo "=== $f"; cat "$f"; }; done
+          } > "$R/08-samms-nova.txt" 2>&1
+          show 08-samms-nova.txt
+
+      - name: Dry-run Nova setup on a scratch copy
+        shell: bash
+        run: |
+          set +e
+          R="$GITHUB_WORKSPACE/recon"
+
+          rsync -a --exclude='.git' --exclude='samms' --exclude='recon' ./ /tmp/dry/
+          mkdir -p /tmp/dry/scripts
+          cp -a samms/scripts/. /tmp/dry/scripts/ 2>/dev/null   # Nova setup + helpers
+
+          cd /tmp/dry
+          git init -q && git add -A >/dev/null 2>&1
+          git -c user.name=recon -c user.email=recon@example.com commit -qm base >/dev/null 2>&1
+
+          echo "::group::Nova setup output (KSU_SUSFS=0)"
+          KSU_SUSFS=0 bash scripts/ksu-nova-setup.sh 2>&1 | tee "$R/10-dry-run-setup.txt"
+          echo "setup exit code: ${PIPESTATUS[0]}" | tee -a "$R/10-dry-run-setup.txt"
+          echo "::endgroup::"
+
+          if [ -f "$GITHUB_WORKSPACE/scripts/patch-ksu-vfs-read.sh" ]; then
+            echo "::group::patch-ksu-vfs-read.sh"
+            bash "$GITHUB_WORKSPACE/scripts/patch-ksu-vfs-read.sh" /tmp/dry 2>&1 | tee "$R/11-dry-run-vfs-read.txt"
+            echo "exit code: ${PIPESTATUS[0]}" | tee -a "$R/11-dry-run-vfs-read.txt"
+            echo "::endgroup::"
+          else
+            echo "scripts/patch-ksu-vfs-read.sh not in the repo, skipped" | tee "$R/11-dry-run-vfs-read.txt"
+          fi
+
+          {
+            git add -A >/dev/null 2>&1
+            echo "--- files changed by the dry run"; git diff --cached --stat | tail -n 80
+            echo; echo "--- hook call sites AFTER dry run (outside drivers/kernelsu)"
+            git grep -nIE 'ksu_handle_|CONFIG_KSU' -- fs kernel drivers/input include security init \
+              ':!drivers/kernelsu' | head -n 200
+            echo; echo "--- fs/read_write.c"; grep -nE 'ksu_|CONFIG_KSU' fs/read_write.c
+            echo; echo "--- diff of hooked files"
+            git diff --cached -- fs/exec.c fs/open.c fs/stat.c fs/read_write.c \
+              kernel/reboot.c kernel/sys.c drivers/input/input.c | head -n 500
+          } > "$R/12-dry-run-result.txt" 2>&1
+          echo "::group::dry-run result"; head -c 150000 "$R/12-dry-run-result.txt"; echo; echo "::endgroup::"
+
+      - name: Upload recon logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recon-logs
+          path: recon/
+          if-no-files-found: warn
