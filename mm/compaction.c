@@ -1021,7 +1021,7 @@ static bool suitable_migration_source(struct compact_control *cc,
 {
 	int block_mt;
 
-	if ((cc->mode != MIGRATE_ASYNC) || !cc->direct_compaction)
+	if ((cc->mode != MIGRATE_ASYNC) || (!cc->direct_compaction && !cc->proactive))
 		return true;
 
 	block_mt = get_pageblock_migratetype(page);
@@ -1310,8 +1310,8 @@ static isolate_migrate_t isolate_migratepages(struct zone *zone,
 	return cc->nr_migratepages ? ISOLATE_SUCCESS : ISOLATE_NONE;
 }
 
-#define PROACTIVE_COMPACT_ORDER		4
-#define COMPACT_PROACTIVE_BASE_MS	2000U
+#define PROACTIVE_COMPACT_ORDER		pageblock_order
+#define COMPACT_PROACTIVE_BASE_MS	4000U
 #define COMPACT_PROACTIVE_MAX_MS	32000U
 #define PROACTIVE_MAX_MIGRATE_SCAN	4096UL
 #define PROACTIVE_MAX_FREE_SCAN		16384UL
@@ -1957,11 +1957,11 @@ void compaction_unregister_node(struct node *node)
 
 /*
  * Gentle budgeted proactive compaction for mobile multitasking:
- * drives node fragmentation below wmark_low so Buddy order-3/4 blocks stay
- * available under multitasking bursts without blocking direct reclaim,
- * inflating PSI memstall, or waking Deep Sleep (0 suspend wakeups).
+ * drives node fragmentation below wmark_low so Buddy pageblock_order (order-3)
+ * movable blocks stay available under multitasking bursts without blocking
+ * direct reclaim, inflating PSI memstall, or waking Deep Sleep (0 wakeups).
  */
-int sysctl_compaction_proactiveness = 40;
+int sysctl_compaction_proactiveness = 30;
 
 static unsigned int fragmentation_score_zone(struct zone *zone)
 {
@@ -2058,7 +2058,7 @@ static bool proactive_compact_node(pg_data_t *pgdat, bool *active)
 			.proactive = true,
 			.proactive_target = wmark_low,
 			.proactive_max_scan = PROACTIVE_MAX_MIGRATE_SCAN,
-			.gfp_mask = GFP_KERNEL,
+			.gfp_mask = GFP_HIGHUSER_MOVABLE,
 		};
 
 		if (!populated_zone(zone))

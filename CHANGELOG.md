@@ -4,6 +4,17 @@ All notable releases of **Flow Kernel** (`miatoll` / SM7125) are documented in t
 
 ---
 
+## [v1.2.4] - 2026-11-25
+
+### RT Clamp & Scheduler Efficiency (18-Run A/B + ABBA Validated)
+- **kernel/sched (`core.c`):** Lower `sysctl_sched_uclamp_util_min_rt_default` from `1024` (`SCHED_CAPACITY_SCALE`) to `384`, keeping RT compositor/audio tasks (`SurfaceFlinger`, `RenderEngine`, `FastMixer`) on Kryo-465 Gold at the `1113.6 MHz` efficiency OPP instead of slamming Gold to `2323.2 MHz` on every small RT wakeup. Cuts screen-on idle power (`~181 mA`, `P6@2323 ≈ 0%`), reduces heavy-notification QS freezes nearly in half, and maintains `0` FastMixer audio underruns.
+- **kernel/sched (`fair.c`):** Tighten WALT cluster migration thresholds from `60%` up / `52%` down (`1706`/`1969`) to `55%` up / `45%` down (`1861`/`2275`, `init`-protected against vendor `post_boot` overrides) while keeping stock `schedutil/down_rate_limit_us` (`20000 us` Silver / `30000 us` Gold) so CFS UI threads (`SystemUI`, `Reddit`, `FotMob`, `TikTok`) migrate to Gold earlier without leaking idle load.
+
+### Proactive Memory Compaction Fix (`mm/compaction.c`)
+- **mm/compaction (`proactive_compact_node`, `suitable_migration_source`):** Align `PROACTIVE_COMPACT_ORDER` to `pageblock_order` (`order-3` on non-hugetlb `miatoll` instead of mismatched `order-4`), switch proactive `gfp_mask` from `GFP_KERNEL` to `GFP_HIGHUSER_MOVABLE` (`MIGRATE_MOVABLE`), and enforce `suitable_migration_source()` filtering for `cc->proactive` passes so background compaction stops scanning unmovable slabs and genuinely coalesces movable user/zRAM pageblocks. Raise `COMPACT_PROACTIVE_BASE_MS` to `4000 ms` and tune `vm.compaction_proactiveness` default to `30` to reduce live `compact_stall` events with lower background wakeup frequency.
+
+---
+
 ## [v1.2.3] - 2026-11-22
 
 ### Charging & Stability (P0 Fix)

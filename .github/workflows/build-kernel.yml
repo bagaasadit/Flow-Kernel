@@ -54,7 +54,7 @@ env:
 
 jobs:
   build:
-    name: Build Flow Kernel v1.2.3 (miatoll, arm64, BakaSU-SUSFS)
+    name: Build Flow Kernel v1.2.4 (miatoll, arm64, BakaSU-SUSFS)
     runs-on: ubuntu-24.04
     # LTO + Polly on a 4 vCPU runner is slow; 6h is the GitHub maximum
     timeout-minutes: 360
